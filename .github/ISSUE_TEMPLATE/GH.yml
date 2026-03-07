@@ -1,131 +1,132 @@
 name: GitHub Access Request
-description: Request GitHub Enterprise / Organization / Repository access
-title: "[GitHub Access] "
-labels: ["access-request"]
+description: Request GitHub Enterprise, Organization, or Repository access
+title: "[GitHub Access Request]: "
+labels:
+  - "access-request"
 
 body:
 
-- type: dropdown
-  id: request_type
-  attributes:
-    label: Request Type
-    description: Select the type of access request
-    options:
-      - New Access
-      - Modify Access
-      - Remove Access
-      - Emergency Access
-  validations:
-    required: true
+  - type: dropdown
+    id: request_type
+    attributes:
+      label: Request Type
+      description: Select the type of request
+      options:
+        - "New Access"
+        - "Modify Access"
+        - "Remove Access"
+        - "Emergency Access"
+    validations:
+      required: true
 
-- type: input
-  id: requested_for
-  attributes:
-    label: Requested For
-    description: Enter the username or email of the person needing access
-    placeholder: user@company.com
-  validations:
-    required: true
+  - type: input
+    id: requested_for
+    attributes:
+      label: Requested For
+      description: Enter the user email or username
+      placeholder: user@company.com
+    validations:
+      required: true
 
-- type: textarea
-  id: justification
-  attributes:
-    label: Business Justification
-    description: Explain why access is required
-    placeholder: Required for maintaining CI/CD pipelines or repository changes
-  validations:
-    required: true
+  - type: textarea
+    id: business_justification
+    attributes:
+      label: Business Justification
+      description: Explain why this access is required
+      placeholder: Access required for deployment pipeline maintenance
+    validations:
+      required: true
 
-- type: dropdown
-  id: access_scope
-  attributes:
-    label: Access Scope
-    description: What type of access is required?
-    options:
-      - Enterprise Account Only
-      - Organization Access
-      - Repository Access
-      - Organization + Repository Access
-  validations:
-    required: true
+  - type: dropdown
+    id: access_scope
+    attributes:
+      label: Access Scope
+      description: What type of access is required?
+      options:
+        - "Enterprise Account Only"
+        - "Organization Access"
+        - "Repository Access"
+        - "Organization + Repository Access"
+    validations:
+      required: true
 
-- type: dropdown
-  id: organization
-  attributes:
-    label: GitHub Organization
-    description: Select the target organization
-    options:
-      - ETS
-      - CA
-      - CDT
-      - Other
+  - type: dropdown
+    id: organization
+    attributes:
+      label: GitHub Organization
+      description: Select the organization
+      options:
+        - "ETS"
+        - "CA"
+        - "CDT"
+        - "Other"
 
-- type: input
-  id: repository
-  attributes:
-    label: Repository Name
-    description: Enter the repository name (if repo access required)
-    placeholder: repo-name
+  - type: input
+    id: repository_name
+    attributes:
+      label: Repository Name
+      description: Enter repository name if repository access is required
+      placeholder: repo-dashboard
 
-- type: dropdown
-  id: permission
-  attributes:
-    label: Repository Permission
-    description: Select the required permission level
-    options:
-      - Read
-      - Triage
-      - Write
-      - Maintain
-      - Admin
+  - type: dropdown
+    id: permission
+    attributes:
+      label: Repository Permission
+      description: Select required permission level
+      options:
+        - "Read"
+        - "Triage"
+        - "Write"
+        - "Maintain"
+        - "Admin"
 
-- type: input
-  id: acl_group
-  attributes:
-    label: Azure AD ACL Group
-    description: Enter the AD group name used for GitHub access
-    placeholder: APP_GITHUB_ETS_CDT_WRITE
+  - type: input
+    id: azure_ad_group
+    attributes:
+      label: Azure AD ACL Group
+      description: Enter the AD group name used for GitHub access
+      placeholder: APP_GITHUB_ETS_CDT_WRITE
 
-- type: dropdown
-  id: acl_exists
-  attributes:
-    label: Does the ACL group already exist?
-    options:
-      - Yes
-      - No
-      - Not Sure
+  - type: dropdown
+    id: acl_exists
+    attributes:
+      label: Does the Azure AD ACL group already exist?
+      options:
+        - "Yes"
+        - "No"
+        - "Not Sure"
 
-- type: dropdown
-  id: team_exists
-  attributes:
-    label: Does the GitHub team already exist?
-    options:
-      - Yes
-      - No
-      - Not Sure
+  - type: dropdown
+    id: github_team_exists
+    attributes:
+      label: Does the GitHub team already exist?
+      options:
+        - "Yes"
+        - "No"
+        - "Not Sure"
 
-- type: dropdown
-  id: temporary_access
-  attributes:
-    label: Temporary Access Required?
-    options:
-      - No
-      - Yes
+  - type: dropdown
+    id: temporary_access
+    attributes:
+      label: Temporary Access Required?
+      options:
+        - "No"
+        - "Yes"
 
-- type: input
-  id: expiry_date
-  attributes:
-    label: Temporary Access Expiry Date
-    description: Required only if temporary access is selected
-    placeholder: YYYY-MM-DD
+  - type: input
+    id: access_expiry_date
+    attributes:
+      label: Temporary Access Expiry Date
+      description: Provide date if temporary access is required
+      placeholder: YYYY-MM-DD
 
-- type: checkboxes
-  id: confirmation
-  attributes:
-    label: Confirmation
-    description: Please confirm the following
-    options:
-      - label: I confirm that the requested access follows the GitHub ACL naming standards.
-        required: true
-      - label: I confirm that the user requires this access for legitimate business purposes.
-        required: true
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmation
+      description: Please confirm the following
+      options:
+        - label: "I confirm that the requested access follows GitHub ACL naming standards."
+          required: true
+        - label: "I confirm that this request is for legitimate business purposes."
+          required: true
