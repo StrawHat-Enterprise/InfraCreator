@@ -1,0 +1,441 @@
+# =============================================================================
+# IssueOps: Build AKS Infrastructure
+# =============================================================================
+# Triggered by commenting `/build-aks-<env>` on an AKS deployment issue
+# Deploys the AKS infrastructure using the state backend from set-aks-backend
+#
+# Supported commands:
+#   /build-aks-dev   - Deploy development environment
+#   /build-aks-prod  - Deploy production environment
+#   /plan-aks-dev    - Plan development environment
+#   /plan-aks-prod   - Plan production environment
+#   /destroy-aks-dev - Destroy development environment
+#   /destroy-aks-prod - Destroy production environment
+# =============================================================================
+
+name: "IssueOps: Build AKS Infrastructure"
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  issues: write
+  contents: read
+  id-token: write
+  actions: read
+
+env:
+  TF_VAR_windows_admin_password: ${{ secrets.WINDOWS_ADMIN_PASSWORD }}
+
+jobs:
+  parse-command:
+    name: Parse Command
+    runs-on: ubuntu-latest
+    if: |
+      contains(github.event.issue.labels.*.name, 'aks')
+    outputs:
+      should_run: ${{ steps.parse.outputs.should_run }}
+      environment: ${{ steps.parse.outputs.environment }}
+      action: ${{ steps.parse.outputs.action }}
+      tfvars_file: ${{ steps.parse.outputs.tfvars_file }}
+    steps:
+      - name: Parse command
+        id: parse
+        run: |
+          COMMENT="${{ github.event.comment.body }}"
+          
+          # Check for build commands
+          if [[ "$COMMENT" =~ ^/build-aks-dev ]]; then
+            echo "should_run=true" >> $GITHUB_OUTPUT
+            echo "environment=dev" >> $GITHUB_OUTPUT
+            echo "action=apply" >> $GITHUB_OUTPUT
+            echo "tfvars_file=dev-linux.tfvars" >> $GITHUB_OUTPUT
+          elif [[ "$COMMENT" =~ ^/build-aks-prod ]]; then
+            echo "should_run=true" >> $GITHUB_OUTPUT
+            echo "environment=prod" >> $GITHUB_OUTPUT
+            echo "action=apply" >> $GITHUB_OUTPUT
+            echo "tfvars_file=prod-linux-windows.tfvars" >> $GITHUB_OUTPUT
+          # Check for plan commands
+          elif [[ "$COMMENT" =~ ^/plan-aks-dev ]]; then
+            echo "should_run=true" >> $GITHUB_OUTPUT
+            echo "environment=dev" >> $GITHUB_OUTPUT
+            echo "action=plan" >> $GITHUB_OUTPUT
+            echo "tfvars_file=dev-linux.tfvars" >> $GITHUB_OUTPUT
+          elif [[ "$COMMENT" =~ ^/plan-aks-prod ]]; then
+            echo "should_run=true" >> $GITHUB_OUTPUT
+            echo "environment=prod" >> $GITHUB_OUTPUT
+            echo "action=plan" >> $GITHUB_OUTPUT
+            echo "tfvars_file=prod-linux-windows.tfvars" >> $GITHUB_OUTPUT
+          # Check for destroy commands
+          elif [[ "$COMMENT" =~ ^/destroy-aks-dev ]]; then
+            echo "should_run=true" >> $GITHUB_OUTPUT
+            echo "environment=dev" >> $GITHUB_OUTPUT
+            echo "action=destroy" >> $GITHUB_OUTPUT
+            echo "tfvars_file=dev-linux.tfvars" >> $GITHUB_OUTPUT
+          elif [[ "$COMMENT" =~ ^/destroy-aks-prod ]]; then
+            echo "should_run=true" >> $GITHUB_OUTPUT
+            echo "environment=prod" >> $GITHUB_OUTPUT
+            echo "action=destroy" >> $GITHUB_OUTPUT
+            echo "tfvars_file=prod-linux-windows.tfvars" >> $GITHUB_OUTPUT
+          else
+            echo "should_run=false" >> $GITHUB_OUTPUT
+          fi
+
+  build-aks:
+    name: Build AKS (${{ needs.parse-command.outputs.environment }})
+    runs-on: ubuntu-latest
+    needs: parse-command
+    if: needs.parse-command.outputs.should_run == 'true'
+    environment: ${{ needs.parse-command.outputs.environment }}
+    
+    steps:
+      - name: Add reaction to comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: context.payload.comment.id,
+              content: 'rocket'
+            });
+
+      - name: Add processing comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const action = '${{ needs.parse-command.outputs.action }}';
+            const env = '${{ needs.parse-command.outputs.environment }}';
+            const emoji = action === 'destroy' ? '🗑️' : action === 'plan' ? '📋' : '🚀';
+            const actionText = action === 'destroy' ? 'Destroying' : action === 'plan' ? 'Planning' : 'Building';
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `## ${emoji} ${actionText} AKS Infrastructure (${env})
+            
+            **Triggered by:** @${context.payload.comment.user.login}
+            **Environment:** ${env}
+            **Action:** ${action}
+            **Workflow Run:** [View Details](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
+            
+            ⏳ ${actionText} infrastructure...`
+            });
+
+      - name: Checkout InfraCreator
+        uses: actions/checkout@v4
+        with:
+          path: InfraCreator
+
+      - name: Checkout Azure-Catalog
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/Azure-Catalog
+          path: Azure-Catalog
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download backend config
+        uses: dawidd6/action-download-artifact@v3
+        with:
+          workflow: issueops-set-backend.yml
+          name: backend-config-${{ github.event.issue.number }}
+          path: backend-config
+          search_artifacts: true
+          if_no_artifact_found: fail
+
+      - name: Read backend config
+        id: backend
+        run: |
+          CONFIG=$(cat backend-config/backend.json)
+          echo "rg_name=$(echo $CONFIG | jq -r '.resource_group_name')" >> $GITHUB_OUTPUT
+          echo "sa_name=$(echo $CONFIG | jq -r '.storage_account_name')" >> $GITHUB_OUTPUT
+          echo "container_name=$(echo $CONFIG | jq -r '.container_name')" >> $GITHUB_OUTPUT
+
+      - name: Parse issue body for configuration
+        id: parse-issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = await github.rest.issues.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number
+            });
+            
+            const body = issue.data.body;
+            
+            // Parse form fields from issue body
+            const getField = (label) => {
+              const regex = new RegExp(`### ${label}\\s*\\n\\s*([^\\n#]+)`, 'i');
+              const match = body.match(regex);
+              return match ? match[1].trim() : '';
+            };
+            
+            // Parse multiline field (admin groups)
+            const getMultilineField = (label) => {
+              const regex = new RegExp(`### ${label}\\s*\\n([\\s\\S]*?)(?=###|$)`, 'i');
+              const match = body.match(regex);
+              if (match) {
+                return match[1]
+                  .split('\n')
+                  .map(l => l.trim())
+                  .filter(l => l && !l.startsWith('_') && l.match(/^[a-f0-9-]+$/i));
+              }
+              return [];
+            };
+            
+            const orgPrefix = getField('Organization Prefix') || 'acme';
+            const location = getField('Azure Region') || 'eastus';
+            const appName = getField('Application Name') || 'platform';
+            const costCenter = getField('Cost Center') || '';
+            const owner = getField('Owner') || '';
+            const adminGroups = getMultilineField('Azure AD Admin Group Object IDs');
+            
+            core.setOutput('org_prefix', orgPrefix);
+            core.setOutput('location', location);
+            core.setOutput('app_name', appName);
+            core.setOutput('cost_center', costCenter);
+            core.setOutput('owner', owner);
+            core.setOutput('admin_groups', JSON.stringify(adminGroups));
+            
+            console.log(`Parsed config: org=${orgPrefix}, location=${location}, app=${appName}`);
+            console.log(`Admin groups: ${JSON.stringify(adminGroups)}`);
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.5.0
+          terraform_wrapper: false
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Override tfvars with issue config
+        working-directory: InfraCreator/AKS/infra
+        run: |
+          ENV="${{ needs.parse-command.outputs.environment }}"
+          TFVARS_FILE="environments/${{ needs.parse-command.outputs.tfvars_file }}"
+          
+          # Read the base tfvars and override with issue values
+          cat > terraform.tfvars <<EOF
+          # Generated from Issue #${{ github.event.issue.number }}
+          
+          organization_prefix = "${{ steps.parse-issue.outputs.org_prefix }}"
+          application_name    = "${{ steps.parse-issue.outputs.app_name }}"
+          environment         = "$ENV"
+          location            = "${{ steps.parse-issue.outputs.location }}"
+          cost_center         = "${{ steps.parse-issue.outputs.cost_center }}"
+          owner               = "${{ steps.parse-issue.outputs.owner }}"
+          
+          admin_group_object_ids = ${{ steps.parse-issue.outputs.admin_groups }}
+          
+          additional_tags = {
+            ManagedBy   = "IssueOps"
+            IssueNumber = "${{ github.event.issue.number }}"
+            Repository  = "${{ github.repository }}"
+            Environment = "$ENV"
+          }
+          EOF
+          
+          # Append the environment-specific settings from the base tfvars
+          echo "" >> terraform.tfvars
+          echo "# Environment-specific settings from $TFVARS_FILE" >> terraform.tfvars
+          
+          # Extract non-override settings from base tfvars
+          grep -E "^(vnet_|subnet_|create_nat|kubernetes_|automatic_|sku_|network_|service_cidr|dns_service|outbound_|system_node|additional_node|enable_windows|windows_admin_user|log_analytics|oms_|key_vault_|azure_policy|oidc_|workload_|acr_|storage_replication)" "$TFVARS_FILE" >> terraform.tfvars || true
+
+      - name: Terraform Init
+        id: init
+        working-directory: InfraCreator/AKS/infra
+        run: |
+          terraform init \
+            -backend-config="resource_group_name=${{ steps.backend.outputs.rg_name }}" \
+            -backend-config="storage_account_name=${{ steps.backend.outputs.sa_name }}" \
+            -backend-config="container_name=${{ steps.backend.outputs.container_name }}" \
+            -backend-config="key=aks-${{ needs.parse-command.outputs.environment }}.tfstate"
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_USE_OIDC: true
+
+      - name: Terraform Plan
+        id: plan
+        working-directory: InfraCreator/AKS/infra
+        run: |
+          terraform plan -out=tfplan -no-color 2>&1 | tee plan_output.txt
+          
+          # Store truncated output for comment
+          echo "plan_summary<<EOF" >> $GITHUB_OUTPUT
+          tail -50 plan_output.txt >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_USE_OIDC: true
+
+      - name: Post plan comment
+        if: needs.parse-command.outputs.action == 'plan'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const planOutput = `${{ steps.plan.outputs.plan_summary }}`;
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `## 📋 Terraform Plan Complete (${{ needs.parse-command.outputs.environment }})
+            
+            <details>
+            <summary>Plan Output (last 50 lines)</summary>
+            
+            \`\`\`
+            ${planOutput}
+            \`\`\`
+            
+            </details>
+            
+            To apply this plan, comment: \`/build-aks-${{ needs.parse-command.outputs.environment }}\`
+            
+            ---
+            ⏱️ Completed at: ${new Date().toISOString()}`
+            });
+
+      - name: Terraform Apply
+        id: apply
+        if: needs.parse-command.outputs.action == 'apply'
+        working-directory: InfraCreator/AKS/infra
+        run: |
+          terraform apply -auto-approve tfplan 2>&1 | tee apply_output.txt
+          
+          # Capture key outputs
+          echo "aks_name=$(terraform output -raw aks_cluster_name 2>/dev/null || echo 'N/A')" >> $GITHUB_OUTPUT
+          echo "aks_fqdn=$(terraform output -raw aks_cluster_fqdn 2>/dev/null || echo 'N/A')" >> $GITHUB_OUTPUT
+          echo "rg_name=$(terraform output -raw resource_group_name 2>/dev/null || echo 'N/A')" >> $GITHUB_OUTPUT
+          echo "acr_name=$(terraform output -raw acr_name 2>/dev/null || echo 'N/A')" >> $GITHUB_OUTPUT
+          echo "kubectl_cmd=$(terraform output -raw kubectl_config_command 2>/dev/null || echo 'N/A')" >> $GITHUB_OUTPUT
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_USE_OIDC: true
+
+      - name: Terraform Destroy
+        id: destroy
+        if: needs.parse-command.outputs.action == 'destroy'
+        working-directory: InfraCreator/AKS/infra
+        run: |
+          terraform destroy -auto-approve 2>&1 | tee destroy_output.txt
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_USE_OIDC: true
+
+      - name: Post apply success comment
+        if: success() && needs.parse-command.outputs.action == 'apply'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `## ✅ AKS Infrastructure Deployed Successfully!
+            
+            ### Environment: ${{ needs.parse-command.outputs.environment }}
+            
+            | Resource | Value |
+            |----------|-------|
+            | **AKS Cluster** | \`${{ steps.apply.outputs.aks_name }}\` |
+            | **Resource Group** | \`${{ steps.apply.outputs.rg_name }}\` |
+            | **FQDN** | \`${{ steps.apply.outputs.aks_fqdn }}\` |
+            | **Container Registry** | \`${{ steps.apply.outputs.acr_name }}\` |
+            
+            ### 🔌 Connect to Cluster
+            
+            \`\`\`bash
+            ${{ steps.apply.outputs.kubectl_cmd }}
+            
+            # Verify connection
+            kubectl get nodes
+            \`\`\`
+            
+            ### 📊 State File
+            
+            State stored in: \`${{ steps.backend.outputs.sa_name }}/tfstate/aks-${{ needs.parse-command.outputs.environment }}.tfstate\`
+            
+            ---
+            ⏱️ Completed at: ${new Date().toISOString()}`
+            });
+
+      - name: Post destroy success comment
+        if: success() && needs.parse-command.outputs.action == 'destroy'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `## 🗑️ AKS Infrastructure Destroyed
+            
+            **Environment:** ${{ needs.parse-command.outputs.environment }}
+            
+            All resources for this environment have been destroyed.
+            
+            The state file has been updated in: \`${{ steps.backend.outputs.sa_name }}/tfstate/aks-${{ needs.parse-command.outputs.environment }}.tfstate\`
+            
+            ---
+            ⏱️ Completed at: ${new Date().toISOString()}`
+            });
+
+      - name: Post failure comment
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const action = '${{ needs.parse-command.outputs.action }}';
+            const env = '${{ needs.parse-command.outputs.environment }}';
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `## ❌ AKS ${action} Failed (${env})
+            
+            **Workflow Run:** [View Details](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
+            
+            Please check the workflow logs for details.
+            
+            ### Common Issues
+            
+            - Backend not initialized (run \`/set-aks-backend\` first)
+            - Missing Azure credentials
+            - Insufficient Azure permissions
+            - Resource conflicts or quota limits
+            - For Windows pools: Missing \`WINDOWS_ADMIN_PASSWORD\` secret
+            
+            ---
+            ⏱️ Failed at: ${new Date().toISOString()}`
+            });
+
+      - name: Upload plan artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan-${{ needs.parse-command.outputs.environment }}-${{ github.run_number }}
+          path: |
+            InfraCreator/AKS/infra/plan_output.txt
+            InfraCreator/AKS/infra/apply_output.txt
+            InfraCreator/AKS/infra/destroy_output.txt
+          retention-days: 30
+          if-no-files-found: ignore

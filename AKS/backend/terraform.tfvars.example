@@ -1,0 +1,36 @@
+# =============================================================================
+# Terraform Backend Infrastructure - Example Variables
+# =============================================================================
+# Copy this file to terraform.tfvars and customize for your organization
+# =============================================================================
+
+# Organization Settings
+organization_prefix = "acme"
+application_name    = "tfstate"
+environment         = "shared"
+location            = "eastus"
+
+# Optional metadata
+cost_center = "IT-Infrastructure"
+owner       = "platform-team@example.com"
+
+# Storage configuration (GRS recommended for state files)
+storage_replication_type = "GRS"
+
+# State containers - add more as needed for different environments
+state_containers = {
+  tfstate = {
+    access_type = "private"
+  }
+  tfstate-dev = {
+    access_type = "private"
+  }
+  tfstate-prod = {
+    access_type = "private"
+  }
+}
+
+additional_tags = {
+  ManagedBy = "Terraform"
+  Purpose   = "Infrastructure State Storage"
+}

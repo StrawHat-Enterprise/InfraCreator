@@ -1,0 +1,136 @@
+name: AKS Infrastructure Deployment
+description: Deploy AKS cluster infrastructure using IssueOps
+title: "[AKS] Infrastructure Deployment Request"
+labels: ["issueops", "aks", "infrastructure"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## 🚀 AKS Infrastructure Deployment Request
+        
+        This issue enables IssueOps for deploying AKS infrastructure.
+        
+        ### Available Commands
+        
+        Comment on this issue with the following commands to trigger deployments:
+        
+        | Command | Description |
+        |---------|-------------|
+        | `/set-aks-backend` | Initialize the Terraform backend (storage account for state files) |
+        | `/build-aks-dev` | Deploy AKS infrastructure for **development** environment |
+        | `/build-aks-prod` | Deploy AKS infrastructure for **production** environment |
+        | `/destroy-aks-dev` | Destroy AKS infrastructure for **development** environment |
+        | `/destroy-aks-prod` | Destroy AKS infrastructure for **production** environment |
+        | `/plan-aks-dev` | Plan AKS infrastructure changes for **development** |
+        | `/plan-aks-prod` | Plan AKS infrastructure changes for **production** |
+        
+        ---
+
+  - type: input
+    id: organization_prefix
+    attributes:
+      label: Organization Prefix
+      description: Short identifier for your organization (3-8 characters)
+      placeholder: "acme"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: location
+    attributes:
+      label: Azure Region
+      description: Select the Azure region for deployment
+      options:
+        - eastus
+        - eastus2
+        - westus2
+        - westus3
+        - centralus
+        - northeurope
+        - westeurope
+        - uksouth
+        - canadacentral
+        - australiaeast
+        - southeastasia
+    validations:
+      required: true
+
+  - type: input
+    id: application_name
+    attributes:
+      label: Application Name
+      description: Name of the application or workload
+      placeholder: "platform"
+    validations:
+      required: true
+
+  - type: input
+    id: cost_center
+    attributes:
+      label: Cost Center
+      description: Cost center for billing
+      placeholder: "Engineering"
+    validations:
+      required: false
+
+  - type: input
+    id: owner
+    attributes:
+      label: Owner
+      description: Owner email or team name
+      placeholder: "platform-team@example.com"
+    validations:
+      required: false
+
+  - type: textarea
+    id: admin_groups
+    attributes:
+      label: Azure AD Admin Group Object IDs
+      description: |
+        List of Azure AD group object IDs for AKS cluster admin access (one per line).
+        Leave empty if not using Azure AD integration.
+      placeholder: |
+        xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+        yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: environments
+    attributes:
+      label: Target Environments
+      description: Which environments do you plan to deploy?
+      options:
+        - label: Development (dev-linux)
+        - label: Production (prod-linux-windows)
+
+  - type: checkboxes
+    id: confirmation
+    attributes:
+      label: Confirmation
+      description: Please confirm the following
+      options:
+        - label: I have reviewed the infrastructure configuration
+          required: true
+        - label: I understand this will create Azure resources that incur costs
+          required: true
+        - label: I have the necessary permissions to deploy to Azure
+          required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        
+        ### 📋 Deployment Steps
+        
+        1. **Submit this issue** to create the deployment request
+        2. **Comment `/set-aks-backend`** to initialize the Terraform state backend
+        3. **Wait for backend completion** (you'll see a success comment)
+        4. **Comment `/build-aks-dev`** or `/build-aks-prod`** to deploy the AKS cluster
+        
+        ### 📊 Tracking
+        
+        Check the **Actions** tab for workflow runs. Results will be posted as comments on this issue.
