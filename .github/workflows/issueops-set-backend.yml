@@ -1,8 +1,15 @@
 # =============================================================================
 # IssueOps: Set AKS Backend
 # =============================================================================
-# Triggered by commenting `/set-aks-backend` on an AKS deployment issue
+# Triggered by commenting `/set-aks-backend` or `/set-aks-backend-<env>` 
 # Creates the Terraform state backend (storage account + resource group)
+# Checks if resources exist before creating.
+#
+# Commands:
+#   /set-aks-backend      - Create shared backend for all environments
+#   /set-aks-backend-dev  - Create backend specifically for dev
+#   /set-aks-backend-prod - Create backend specifically for prod
+#   /check-backend        - Check if backend exists without creating
 # =============================================================================
 
 name: "IssueOps: Set AKS Backend"
@@ -16,22 +23,41 @@ permissions:
   contents: read
   id-token: write
 
+env:
+  BACKEND_PREFIX: "tfstate"
+
 jobs:
   parse-command:
     name: Parse Command
     runs-on: ubuntu-latest
     if: |
-      github.event.issue.labels.*.name == 'aks' &&
-      contains(github.event.comment.body, '/set-aks-backend')
+      contains(github.event.issue.labels.*.name, 'aks')
     outputs:
       should_run: ${{ steps.parse.outputs.should_run }}
+      environment: ${{ steps.parse.outputs.environment }}
+      check_only: ${{ steps.parse.outputs.check_only }}
     steps:
       - name: Parse command
         id: parse
         run: |
           COMMENT="${{ github.event.comment.body }}"
-          if [[ "$COMMENT" =~ ^/set-aks-backend ]]; then
+          
+          if [[ "$COMMENT" =~ ^/set-aks-backend-dev ]]; then
             echo "should_run=true" >> $GITHUB_OUTPUT
+            echo "environment=dev" >> $GITHUB_OUTPUT
+            echo "check_only=false" >> $GITHUB_OUTPUT
+          elif [[ "$COMMENT" =~ ^/set-aks-backend-prod ]]; then
+            echo "should_run=true" >> $GITHUB_OUTPUT
+            echo "environment=prod" >> $GITHUB_OUTPUT
+            echo "check_only=false" >> $GITHUB_OUTPUT
+          elif [[ "$COMMENT" =~ ^/set-aks-backend ]]; then
+            echo "should_run=true" >> $GITHUB_OUTPUT
+            echo "environment=shared" >> $GITHUB_OUTPUT
+            echo "check_only=false" >> $GITHUB_OUTPUT
+          elif [[ "$COMMENT" =~ ^/check-backend ]]; then
+            echo "should_run=true" >> $GITHUB_OUTPUT
+            echo "environment=shared" >> $GITHUB_OUTPUT
+            echo "check_only=true" >> $GITHUB_OUTPUT
           else
             echo "should_run=false" >> $GITHUB_OUTPUT
           fi
@@ -41,6 +67,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: parse-command
     if: needs.parse-command.outputs.should_run == 'true'
+    environment: ${{ needs.parse-command.outputs.environment != 'shared' && needs.parse-command.outputs.environment || '' }}
     
     steps:
       - name: Add reaction to comment
@@ -58,11 +85,15 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
+            const checkOnly = '${{ needs.parse-command.outputs.check_only }}' === 'true';
+            const env = '${{ needs.parse-command.outputs.environment }}';
+            const action = checkOnly ? 'Checking' : 'Setting up';
+            
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: `## 🔧 Setting up AKS Backend\n\n**Triggered by:** @${context.payload.comment.user.login}\n**Workflow Run:** [View Details](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n\n⏳ Initializing Terraform backend infrastructure...`
+              body: `## 🔧 ${action} AKS Backend (${env})\n\n**Triggered by:** @${context.payload.comment.user.login}\n**Environment:** ${env}\n**Workflow Run:** [View Details](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n\n⏳ ${action} Terraform backend infrastructure...`
             });
 
       - name: Checkout InfraCreator
@@ -111,12 +142,6 @@ jobs:
             
             console.log(`Parsed config: org=${orgPrefix}, location=${location}, app=${appName}`);
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: 1.5.0
-          terraform_wrapper: false
-
       - name: Azure Login
         uses: azure/login@v2
         with:
@@ -124,13 +149,187 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
+      # =======================================================================
+      # Check if backend resources already exist
+      # =======================================================================
+      - name: Check existing resources
+        id: check-existing
+        run: |
+          ORG_PREFIX="${{ steps.parse-issue.outputs.org_prefix }}"
+          LOCATION="${{ steps.parse-issue.outputs.location }}"
+          ENV="${{ needs.parse-command.outputs.environment }}"
+          
+          # Construct expected resource names
+          RG_NAME="rg-${ORG_PREFIX}-tfstate-${ENV}-${LOCATION}"
+          # Storage account names must be lowercase, no hyphens, max 24 chars
+          SA_NAME=$(echo "st${ORG_PREFIX}tfstate${ENV}" | tr '[:upper:]' '[:lower:]' | tr -d '-' | cut -c1-24)
+          
+          echo "rg_name=${RG_NAME}" >> $GITHUB_OUTPUT
+          echo "sa_name=${SA_NAME}" >> $GITHUB_OUTPUT
+          
+          echo "🔍 Checking for existing resources..."
+          echo "   Resource Group: ${RG_NAME}"
+          echo "   Storage Account: ${SA_NAME}"
+          
+          # Check Resource Group
+          RG_EXISTS="false"
+          if az group show --name "$RG_NAME" &>/dev/null; then
+            RG_EXISTS="true"
+            echo "✅ Resource Group exists"
+          else
+            echo "❌ Resource Group does not exist"
+          fi
+          echo "rg_exists=${RG_EXISTS}" >> $GITHUB_OUTPUT
+          
+          # Check Storage Account
+          SA_EXISTS="false"
+          if az storage account show --name "$SA_NAME" --resource-group "$RG_NAME" &>/dev/null; then
+            SA_EXISTS="true"
+            echo "✅ Storage Account exists"
+          else
+            echo "❌ Storage Account does not exist"
+          fi
+          echo "sa_exists=${SA_EXISTS}" >> $GITHUB_OUTPUT
+          
+          # Check if state containers exist
+          CONTAINERS_EXIST="false"
+          if [ "$SA_EXISTS" == "true" ]; then
+            if az storage container show --name "tfstate" --account-name "$SA_NAME" --auth-mode login &>/dev/null; then
+              CONTAINERS_EXIST="true"
+              echo "✅ State container exists"
+            else
+              echo "❌ State container does not exist"
+            fi
+          fi
+          echo "containers_exist=${CONTAINERS_EXIST}" >> $GITHUB_OUTPUT
+          
+          # Determine if fully configured
+          if [ "$RG_EXISTS" == "true" ] && [ "$SA_EXISTS" == "true" ] && [ "$CONTAINERS_EXIST" == "true" ]; then
+            echo "all_exist=true" >> $GITHUB_OUTPUT
+            echo ""
+            echo "🎉 All backend resources already exist!"
+          else
+            echo "all_exist=false" >> $GITHUB_OUTPUT
+            echo ""
+            echo "📦 Some resources need to be created"
+          fi
+
+      - name: Post check-only results
+        if: needs.parse-command.outputs.check_only == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const rgExists = '${{ steps.check-existing.outputs.rg_exists }}' === 'true';
+            const saExists = '${{ steps.check-existing.outputs.sa_exists }}' === 'true';
+            const containersExist = '${{ steps.check-existing.outputs.containers_exist }}' === 'true';
+            const allExist = '${{ steps.check-existing.outputs.all_exist }}' === 'true';
+            
+            const status = (exists) => exists ? '✅ Exists' : '❌ Missing';
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `## 🔍 Backend Status Check
+            
+            | Resource | Status |
+            |----------|--------|
+            | Resource Group | ${status(rgExists)} |
+            | Storage Account | ${status(saExists)} |
+            | State Containers | ${status(containersExist)} |
+            
+            **Resource Group:** \`${{ steps.check-existing.outputs.rg_name }}\`
+            **Storage Account:** \`${{ steps.check-existing.outputs.sa_name }}\`
+            
+            ${allExist 
+              ? '### ✅ Backend is fully configured!\n\nYou can proceed with `/build-aks-dev` or `/build-aks-prod`'
+              : '### ⚠️ Backend needs setup\n\nRun `/set-aks-backend` to create missing resources'}
+            
+            ---
+            ⏱️ Checked at: ${new Date().toISOString()}`
+            });
+
+      - name: Skip if check only
+        if: needs.parse-command.outputs.check_only == 'true'
+        run: |
+          echo "Check-only mode, skipping creation"
+          exit 0
+
+      - name: Post using-existing comment
+        if: needs.parse-command.outputs.check_only != 'true' && steps.check-existing.outputs.all_exist == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `## ✅ Backend Already Exists!
+            
+            **Resource Group:** \`${{ steps.check-existing.outputs.rg_name }}\`
+            **Storage Account:** \`${{ steps.check-existing.outputs.sa_name }}\`
+            **Container:** \`tfstate\`
+            
+            The backend is already configured. You can proceed with deploying:
+            
+            | Environment | Command |
+            |-------------|---------|
+            | Development | \`/build-aks-dev\` |
+            | Production | \`/build-aks-prod\` |
+            
+            ---
+            ⏱️ Checked at: ${new Date().toISOString()}`
+            });
+
+      - name: Save existing backend config
+        if: needs.parse-command.outputs.check_only != 'true' && steps.check-existing.outputs.all_exist == 'true'
+        run: |
+          mkdir -p backend-config
+          cat > backend-config/backend.json <<EOF
+          {
+            "resource_group_name": "${{ steps.check-existing.outputs.rg_name }}",
+            "storage_account_name": "${{ steps.check-existing.outputs.sa_name }}",
+            "container_name": "tfstate",
+            "issue_number": "${{ github.event.issue.number }}",
+            "environment": "${{ needs.parse-command.outputs.environment }}",
+            "already_existed": true
+          }
+          EOF
+
+      - name: Upload existing backend config
+        if: needs.parse-command.outputs.check_only != 'true' && steps.check-existing.outputs.all_exist == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-config-${{ github.event.issue.number }}
+          path: backend-config/
+          retention-days: 90
+
+      - name: Skip terraform if all exist
+        if: needs.parse-command.outputs.check_only != 'true' && steps.check-existing.outputs.all_exist == 'true'
+        run: |
+          echo "All resources exist, skipping Terraform"
+          exit 0
+
+      # =======================================================================
+      # Create resources with Terraform (only if needed)
+      # =======================================================================
+      - name: Setup Terraform
+        if: needs.parse-command.outputs.check_only != 'true' && steps.check-existing.outputs.all_exist != 'true'
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.5.0
+          terraform_wrapper: false
+
       - name: Create tfvars file
+        if: needs.parse-command.outputs.check_only != 'true' && steps.check-existing.outputs.all_exist != 'true'
         working-directory: InfraCreator/AKS/backend
         run: |
+          ENV="${{ needs.parse-command.outputs.environment }}"
+          
           cat > terraform.tfvars <<EOF
           organization_prefix      = "${{ steps.parse-issue.outputs.org_prefix }}"
           application_name         = "tfstate"
-          environment              = "shared"
+          environment              = "${ENV}"
           location                 = "${{ steps.parse-issue.outputs.location }}"
           cost_center              = "${{ steps.parse-issue.outputs.cost_center }}"
           owner                    = "${{ steps.parse-issue.outputs.owner }}"
@@ -157,6 +356,7 @@ jobs:
 
       - name: Terraform Init
         id: init
+        if: needs.parse-command.outputs.check_only != 'true' && steps.check-existing.outputs.all_exist != 'true'
         working-directory: InfraCreator/AKS/backend
         run: terraform init
         env:
@@ -167,6 +367,7 @@ jobs:
 
       - name: Terraform Plan
         id: plan
+        if: needs.parse-command.outputs.check_only != 'true' && steps.check-existing.outputs.all_exist != 'true'
         working-directory: InfraCreator/AKS/backend
         run: |
           terraform plan -out=tfplan -no-color 2>&1 | tee plan_output.txt
@@ -181,6 +382,7 @@ jobs:
 
       - name: Terraform Apply
         id: apply
+        if: needs.parse-command.outputs.check_only != 'true' && steps.check-existing.outputs.all_exist != 'true'
         working-directory: InfraCreator/AKS/backend
         run: |
           terraform apply -auto-approve tfplan 2>&1 | tee apply_output.txt
@@ -195,7 +397,7 @@ jobs:
           ARM_USE_OIDC: true
 
       - name: Post success comment
-        if: success()
+        if: success() && needs.parse-command.outputs.check_only != 'true' && steps.check-existing.outputs.all_exist != 'true'
         uses: actions/github-script@v7
         with:
           script: |
@@ -234,7 +436,7 @@ jobs:
             });
 
       - name: Save backend config as artifact
-        if: success()
+        if: success() && needs.parse-command.outputs.check_only != 'true' && steps.check-existing.outputs.all_exist != 'true'
         run: |
           mkdir -p backend-config
           cat > backend-config/backend.json <<EOF
@@ -242,12 +444,14 @@ jobs:
             "resource_group_name": "${{ steps.apply.outputs.rg_name }}",
             "storage_account_name": "${{ steps.apply.outputs.sa_name }}",
             "container_name": "tfstate",
-            "issue_number": "${{ github.event.issue.number }}"
+            "issue_number": "${{ github.event.issue.number }}",
+            "environment": "${{ needs.parse-command.outputs.environment }}",
+            "created_new": true
           }
           EOF
 
       - name: Upload backend config
-        if: success()
+        if: success() && needs.parse-command.outputs.check_only != 'true' && steps.check-existing.outputs.all_exist != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: backend-config-${{ github.event.issue.number }}
