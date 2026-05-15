@@ -1,0 +1,61 @@
+# =============================================================================
+# Sample Workflow - Self-Hosted Runner Test
+# =============================================================================
+# This workflow runs on the self-hosted ARC runners deployed in AKS
+# 
+# Runner Label: straw-hat-runners-linux
+# The runner is registered at organization level (BkCloudOps)
+# =============================================================================
+
+name: "Sample: Self-Hosted Runner Test"
+
+on:
+  workflow_dispatch:
+    inputs:
+      message:
+        description: 'Message to display'
+        required: false
+        default: 'Hello from self-hosted runner!'
+
+jobs:
+  test-runner:
+    name: Test Self-Hosted Runner
+    # Use the self-hosted runner label
+    runs-on: straw-hat-runners-linux
+    
+    steps:
+      - name: Display runner info
+        run: |
+          echo "🚀 Running on self-hosted runner!"
+          echo "Message: ${{ github.event.inputs.message }}"
+          echo ""
+          echo "=== Runner Information ==="
+          echo "Runner Name: $RUNNER_NAME"
+          echo "Runner OS: $RUNNER_OS"
+          echo "Runner Arch: $RUNNER_ARCH"
+          echo ""
+          echo "=== System Information ==="
+          uname -a
+          echo ""
+          echo "=== Docker Version ==="
+          docker --version || echo "Docker not available"
+          echo ""
+          echo "=== Environment ==="
+          env | grep -E "GITHUB|RUNNER" | sort
+
+      - name: Test Docker (DinD)
+        run: |
+          echo "Testing Docker-in-Docker..."
+          docker run --rm hello-world
+          echo "✅ Docker is working!"
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: List repository files
+        run: |
+          echo "=== Repository Contents ==="
+          ls -la
+          echo ""
+          echo "=== Workflows ==="
+          ls -la .github/workflows/ || echo "No workflows directory"
