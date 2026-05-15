@@ -16,6 +16,8 @@
 #   /destroy-aks-prod - Destroy production infrastructure (via Terraform)
 #   /delete-all-dev   - FORCE DELETE entire dev resource group (bypasses Terraform)
 #   /delete-all-prod  - FORCE DELETE entire prod resource group (bypasses Terraform)
+#   /purge-all-dev    - DELETE everything: infrastructure + backend storage (COMPLETE RESET)
+#   /purge-all-prod   - DELETE everything: infrastructure + backend storage (COMPLETE RESET)
 #
 # Required Secrets:
 #   AZURE_CLIENT_ID        - Service Principal Client ID
@@ -150,6 +152,19 @@ jobs:
             echo "should_run=true" >> $GITHUB_OUTPUT
             echo "environment=prod" >> $GITHUB_OUTPUT
             echo "action=delete-all" >> $GITHUB_OUTPUT
+            echo "tfvars_file=prod-linux-windows.tfvars" >> $GITHUB_OUTPUT
+            echo "check_only=false" >> $GITHUB_OUTPUT
+          # Check for purge-all commands (delete EVERYTHING including backend)
+          elif [[ "$COMMENT" =~ ^/purge-all-dev ]]; then
+            echo "should_run=true" >> $GITHUB_OUTPUT
+            echo "environment=dev" >> $GITHUB_OUTPUT
+            echo "action=purge-all" >> $GITHUB_OUTPUT
+            echo "tfvars_file=dev-linux.tfvars" >> $GITHUB_OUTPUT
+            echo "check_only=false" >> $GITHUB_OUTPUT
+          elif [[ "$COMMENT" =~ ^/purge-all-prod ]]; then
+            echo "should_run=true" >> $GITHUB_OUTPUT
+            echo "environment=prod" >> $GITHUB_OUTPUT
+            echo "action=purge-all" >> $GITHUB_OUTPUT
             echo "tfvars_file=prod-linux-windows.tfvars" >> $GITHUB_OUTPUT
             echo "check_only=false" >> $GITHUB_OUTPUT
           else
@@ -737,6 +752,155 @@ jobs:
             - The naming convention has changed
             
             Use \`/check-aks-${{ needs.parse-command.outputs.environment }}\` to verify current state.
+            
+            ---
+            ⏱️ Checked at: ${new Date().toISOString()}`
+            });
+
+      # =======================================================================
+      # Purge-All: Delete EVERYTHING (infrastructure + backend storage)
+      # =======================================================================
+      - name: Purge All - Check resource groups
+        id: purge-check
+        if: needs.parse-command.outputs.action == 'purge-all'
+        run: |
+          INFRA_RG="${{ steps.check-existing.outputs.rg_name }}"
+          BACKEND_RG="${{ steps.backend.outputs.rg_name }}"
+          
+          echo "🔍 Checking resource groups to purge..."
+          echo "   Infrastructure RG: ${INFRA_RG}"
+          echo "   Backend RG: ${BACKEND_RG}"
+          
+          # Check infrastructure RG
+          if az group show --name "$INFRA_RG" &>/dev/null; then
+            echo "infra_rg_exists=true" >> $GITHUB_OUTPUT
+            echo "✅ Infrastructure RG found"
+            az resource list --resource-group "$INFRA_RG" --query "[].{Name:name, Type:type}" -o table || true
+          else
+            echo "infra_rg_exists=false" >> $GITHUB_OUTPUT
+            echo "⚠️ Infrastructure RG does not exist"
+          fi
+          
+          # Check backend RG
+          if az group show --name "$BACKEND_RG" &>/dev/null; then
+            echo "backend_rg_exists=true" >> $GITHUB_OUTPUT
+            echo "✅ Backend RG found"
+            az resource list --resource-group "$BACKEND_RG" --query "[].{Name:name, Type:type}" -o table || true
+          else
+            echo "backend_rg_exists=false" >> $GITHUB_OUTPUT
+            echo "⚠️ Backend RG does not exist"
+          fi
+
+      - name: Purge All - Delete infrastructure resource group
+        id: purge-infra
+        if: needs.parse-command.outputs.action == 'purge-all' && steps.purge-check.outputs.infra_rg_exists == 'true'
+        run: |
+          RG_NAME="${{ steps.check-existing.outputs.rg_name }}"
+          
+          echo "🗑️ FORCE DELETING infrastructure resource group: ${RG_NAME}"
+          
+          if az group delete --name "$RG_NAME" --yes --no-wait; then
+            echo "✅ Infrastructure RG deletion initiated"
+            echo "delete_initiated=true" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Failed to delete infrastructure RG"
+            echo "delete_initiated=false" >> $GITHUB_OUTPUT
+          fi
+          
+          # Wait for deletion
+          echo "⏳ Waiting for infrastructure RG deletion..."
+          for i in {1..30}; do
+            if ! az group show --name "$RG_NAME" &>/dev/null; then
+              echo "✅ Infrastructure RG deleted"
+              echo "delete_complete=true" >> $GITHUB_OUTPUT
+              break
+            fi
+            echo "   Still deleting... (attempt $i/30)"
+            sleep 30
+          done
+
+      - name: Purge All - Delete backend storage resource group
+        id: purge-backend
+        if: needs.parse-command.outputs.action == 'purge-all' && steps.purge-check.outputs.backend_rg_exists == 'true'
+        run: |
+          RG_NAME="${{ steps.backend.outputs.rg_name }}"
+          
+          echo "🗑️ FORCE DELETING backend storage resource group: ${RG_NAME}"
+          echo "⚠️ This will delete ALL Terraform state files!"
+          
+          if az group delete --name "$RG_NAME" --yes --no-wait; then
+            echo "✅ Backend RG deletion initiated"
+            echo "delete_initiated=true" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Failed to delete backend RG"
+            echo "delete_initiated=false" >> $GITHUB_OUTPUT
+          fi
+          
+          # Wait for deletion
+          echo "⏳ Waiting for backend RG deletion..."
+          for i in {1..10}; do
+            if ! az group show --name "$RG_NAME" &>/dev/null; then
+              echo "✅ Backend RG deleted"
+              echo "delete_complete=true" >> $GITHUB_OUTPUT
+              break
+            fi
+            echo "   Still deleting... (attempt $i/10)"
+            sleep 15
+          done
+
+      - name: Post purge-all success comment
+        if: success() && needs.parse-command.outputs.action == 'purge-all'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const infraDeleted = '${{ steps.purge-infra.outputs.delete_complete }}' === 'true' || '${{ steps.purge-check.outputs.infra_rg_exists }}' !== 'true';
+            const backendDeleted = '${{ steps.purge-backend.outputs.delete_complete }}' === 'true' || '${{ steps.purge-check.outputs.backend_rg_exists }}' !== 'true';
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `## 💥 COMPLETE PURGE (${{ needs.parse-command.outputs.environment }})
+            
+            ### Resource Groups Deleted
+            
+            | Resource Group | Status |
+            |----------------|--------|
+            | **Infrastructure:** \`${{ steps.check-existing.outputs.rg_name }}\` | ${infraDeleted ? '✅ Deleted' : '⏳ In progress'} |
+            | **Backend:** \`${{ steps.backend.outputs.rg_name }}\` | ${backendDeleted ? '✅ Deleted' : '⏳ In progress'} |
+            
+            ### ⚠️ What was deleted:
+            - All AKS infrastructure (cluster, VNet, Key Vault, etc.)
+            - Terraform state backend (storage account)
+            - All Terraform state files
+            
+            ${infraDeleted && backendDeleted 
+              ? '### ✅ COMPLETE RESET!\n\nTo start fresh, use `/set-aks-backend` to create a new backend, then `/build-aks-${{ needs.parse-command.outputs.environment }}` to deploy.'
+              : '### ⏳ Deletion in progress\n\nSome resources may still be deleting. Check Azure Portal for status.'}
+            
+            ---
+            ⏱️ Completed at: ${new Date().toISOString()}`
+            });
+
+      - name: Post purge-all nothing found comment
+        if: needs.parse-command.outputs.action == 'purge-all' && steps.purge-check.outputs.infra_rg_exists != 'true' && steps.purge-check.outputs.backend_rg_exists != 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `## ⚠️ Nothing to Purge (${{ needs.parse-command.outputs.environment }})
+            
+            | Resource Group | Status |
+            |----------------|--------|
+            | **Infrastructure:** \`${{ steps.check-existing.outputs.rg_name }}\` | ❌ Does not exist |
+            | **Backend:** \`${{ steps.backend.outputs.rg_name }}\` | ❌ Does not exist |
+            
+            Both resource groups have already been deleted or were never created.
+            
+            To start fresh, use \`/set-aks-backend\` to create a new backend.
             
             ---
             ⏱️ Checked at: ${new Date().toISOString()}`
