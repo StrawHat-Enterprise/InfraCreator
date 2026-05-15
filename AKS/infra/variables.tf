@@ -64,11 +64,8 @@ variable "k8s_admin_object_id" {
   default     = ""
 }
 
-variable "deployment_spn_object_id" {
-  description = "Service Principal Object ID used for deployment (will get Contributor role)"
-  type        = string
-  default     = ""
-}
+# Note: deployment_spn_object_id is auto-detected using azurerm_client_config
+# The SPN running Terraform automatically gets Contributor and K8s Admin roles
 
 # =============================================================================
 # Network Configuration

@@ -21,9 +21,10 @@
 #   AZURE_CLIENT_ID        - Service Principal Client ID
 #   AZURE_TENANT_ID        - Azure AD Tenant ID
 #   AZURE_SUBSCRIPTION_ID  - Azure Subscription ID
-#   AZURE_SPN_OBJECT_ID    - Service Principal Object ID (for RBAC)
 #   K8S_ADMIN_OBJECT_ID    - Azure AD Object ID for K8s cluster admin access
 #   WINDOWS_ADMIN_PASSWORD - (Optional) Password for Windows node pools
+#
+# Note: SPN Object ID is auto-detected by Terraform using azurerm_client_config
 # =============================================================================
 
 name: "IssueOps: Build AKS Infrastructure"
@@ -65,7 +66,7 @@ permissions:
 env:
   TF_VAR_windows_admin_password: ${{ secrets.WINDOWS_ADMIN_PASSWORD }}
   TF_VAR_k8s_admin_object_id: ${{ secrets.K8S_ADMIN_OBJECT_ID }}
-  TF_VAR_deployment_spn_object_id: ${{ secrets.AZURE_SPN_OBJECT_ID }}
+  # Note: SPN Object ID is auto-detected by Terraform using azurerm_client_config
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:

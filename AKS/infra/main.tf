@@ -11,6 +11,12 @@
 # =============================================================================
 
 # =============================================================================
+# Current Client Configuration (auto-detect SPN running Terraform)
+# =============================================================================
+
+data "azurerm_client_config" "current" {}
+
+# =============================================================================
 # Naming Convention Module
 # =============================================================================
 
@@ -327,7 +333,8 @@ module "aks" {
 # =============================================================================
 # RBAC Role Assignments
 # =============================================================================
-# Only the deployment SPN and explicit admin object ID get privileged roles
+# Only the deployment SPN (auto-detected) and explicit admin object ID get
+# privileged roles. No other principals should have Contributor or K8s Admin.
 # =============================================================================
 
 # Azure Kubernetes Service RBAC Cluster Admin for the K8s admin user/group
@@ -346,20 +353,18 @@ resource "azurerm_role_assignment" "rg_contributor_admin" {
   principal_id         = var.k8s_admin_object_id
 }
 
-# Contributor role on resource group for deployment SPN
+# Contributor role on resource group for deployment SPN (auto-detected from current client)
 resource "azurerm_role_assignment" "rg_contributor_spn" {
-  count                = var.deployment_spn_object_id != "" ? 1 : 0
   scope                = module.resource_group.id
   role_definition_name = "Contributor"
-  principal_id         = var.deployment_spn_object_id
+  principal_id         = data.azurerm_client_config.current.object_id
 }
 
 # Azure Kubernetes Service RBAC Cluster Admin for deployment SPN
 resource "azurerm_role_assignment" "aks_cluster_admin_spn" {
-  count                = var.deployment_spn_object_id != "" ? 1 : 0
   scope                = module.aks.id
   role_definition_name = "Azure Kubernetes Service RBAC Cluster Admin"
-  principal_id         = var.deployment_spn_object_id
+  principal_id         = data.azurerm_client_config.current.object_id
 }
 
 # Key Vault Secrets Officer for K8s admin (to manage secrets)
@@ -370,10 +375,9 @@ resource "azurerm_role_assignment" "kv_secrets_officer_admin" {
   principal_id         = var.k8s_admin_object_id
 }
 
-# Key Vault Secrets Officer for deployment SPN (to push secrets during deployment)
+# Key Vault Secrets Officer for deployment SPN (to push secrets during bootstrap)
 resource "azurerm_role_assignment" "kv_secrets_officer_spn" {
-  count                = var.deployment_spn_object_id != "" ? 1 : 0
   scope                = module.key_vault.id
   role_definition_name = "Key Vault Secrets Officer"
-  principal_id         = var.deployment_spn_object_id
+  principal_id         = data.azurerm_client_config.current.object_id
 }
