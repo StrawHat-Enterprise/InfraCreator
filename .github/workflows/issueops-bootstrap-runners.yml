@@ -191,13 +191,33 @@ jobs:
           LOCATION="${{ steps.parse-issue.outputs.location }}"
           ENV="${{ needs.parse-command.outputs.environment }}"
           
-          RG_NAME="rg-${ORG_PREFIX}-${APP_NAME}-${ENV}-${LOCATION}"
-          AKS_NAME="aks-${ORG_PREFIX}-${APP_NAME}-${ENV}-${LOCATION}"
-          KV_NAME="kv-${ORG_PREFIX}-${APP_NAME}-${ENV}-${LOCATION}"
+          # Convert location to short code (matching Azure-Catalog naming module)
+          declare -A LOCATION_SHORT=(
+            ["eastus"]="eus" ["eastus2"]="eus2" ["westus"]="wus" ["westus2"]="wus2"
+            ["westus3"]="wus3" ["centralus"]="cus" ["northcentralus"]="ncus"
+            ["southcentralus"]="scus" ["westcentralus"]="wcus" ["canadacentral"]="cac"
+            ["canadaeast"]="cae" ["brazilsouth"]="brs" ["northeurope"]="neu"
+            ["westeurope"]="weu" ["uksouth"]="uks" ["ukwest"]="ukw"
+          )
+          LOCATION_CODE="${LOCATION_SHORT[$LOCATION]:-${LOCATION:0:4}}"
+          
+          # Convert environment to short code
+          declare -A ENV_SHORT=(
+            ["development"]="dev" ["dev"]="dev" ["staging"]="stg" ["stg"]="stg"
+            ["production"]="prd" ["prod"]="prd" ["prd"]="prd" ["test"]="tst"
+          )
+          ENV_CODE="${ENV_SHORT[$ENV]:-$ENV}"
+          
+          # Naming pattern: {prefix}-{app}-{location_short}-{env_short}-{type}
+          BASE_NAME="${ORG_PREFIX}-${APP_NAME}-${LOCATION_CODE}-${ENV_CODE}"
+          RG_NAME="${BASE_NAME}-rg"
+          AKS_NAME="${BASE_NAME}-aks"
+          KV_NAME="${BASE_NAME}-kv"
           
           # Truncate Key Vault name if > 24 chars
           KV_NAME=$(echo "$KV_NAME" | cut -c1-24)
           
+          echo "🔧 Using naming pattern: ${BASE_NAME}-*"
           echo "rg_name=${RG_NAME}" >> $GITHUB_OUTPUT
           echo "aks_name=${AKS_NAME}" >> $GITHUB_OUTPUT
           echo "kv_name=${KV_NAME}" >> $GITHUB_OUTPUT
@@ -216,7 +236,7 @@ jobs:
           echo "oidc_issuer=${OIDC_ISSUER}" >> $GITHUB_OUTPUT
           
           # Get Managed Identity Client ID (created by Terraform)
-          MI_NAME="id-${ORG_PREFIX}-${APP_NAME}-${ENV}-${LOCATION}"
+          MI_NAME="${BASE_NAME}-id"
           MI_CLIENT_ID=$(az identity show \
             --resource-group "$RG_NAME" \
             --name "$MI_NAME" \
