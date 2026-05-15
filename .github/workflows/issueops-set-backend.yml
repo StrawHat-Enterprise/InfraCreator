@@ -370,6 +370,7 @@ jobs:
         if: needs.parse-command.outputs.check_only != 'true' && steps.check-existing.outputs.all_exist != 'true'
         working-directory: InfraCreator/AKS/backend
         run: |
+          set -o pipefail
           terraform plan -out=tfplan -no-color 2>&1 | tee plan_output.txt
           echo "plan_output<<EOF" >> $GITHUB_OUTPUT
           head -100 plan_output.txt >> $GITHUB_OUTPUT
@@ -385,6 +386,7 @@ jobs:
         if: needs.parse-command.outputs.check_only != 'true' && steps.check-existing.outputs.all_exist != 'true'
         working-directory: InfraCreator/AKS/backend
         run: |
+          set -o pipefail
           terraform apply -auto-approve tfplan 2>&1 | tee apply_output.txt
           
           # Capture outputs

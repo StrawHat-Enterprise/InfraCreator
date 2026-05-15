@@ -436,6 +436,7 @@ jobs:
         if: needs.parse-command.outputs.check_only != 'true'
         working-directory: InfraCreator/AKS/infra
         run: |
+          set -o pipefail
           terraform plan -out=tfplan -no-color 2>&1 | tee plan_output.txt
           
           # Store truncated output for comment
@@ -481,6 +482,7 @@ jobs:
         if: needs.parse-command.outputs.action == 'apply'
         working-directory: InfraCreator/AKS/infra
         run: |
+          set -o pipefail
           terraform apply -auto-approve tfplan 2>&1 | tee apply_output.txt
           
           # Capture key outputs
