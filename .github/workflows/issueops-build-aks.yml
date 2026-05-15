@@ -21,6 +21,30 @@ name: "IssueOps: Build AKS Infrastructure"
 on:
   issue_comment:
     types: [created]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - prod
+      action:
+        description: 'Action to perform'
+        required: true
+        default: 'plan'
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
+      use_self_hosted:
+        description: 'Use self-hosted runners (requires runners already deployed)'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   issues: write
@@ -30,6 +54,7 @@ permissions:
 
 env:
   TF_VAR_windows_admin_password: ${{ secrets.WINDOWS_ADMIN_PASSWORD }}
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   parse-command:
@@ -107,7 +132,7 @@ jobs:
 
   build-aks:
     name: Build AKS (${{ needs.parse-command.outputs.environment }})
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.inputs.use_self_hosted == 'true' && 'straw-hat-runners-linux' || 'ubuntu-latest' }}
     needs: parse-command
     if: needs.parse-command.outputs.should_run == 'true'
     environment: ${{ needs.parse-command.outputs.environment }}
