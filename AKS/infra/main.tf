@@ -253,6 +253,9 @@ module "aks" {
   resource_group_name = module.resource_group.name
   common_tags         = module.naming.common_tags
 
+  # Custom node resource group name (max 80 chars, auto-generated can be too long)
+  node_resource_group = "MC_${var.organization_prefix}_${var.application_name}_${var.environment}_${var.location}"
+
   # Kubernetes configuration
   kubernetes_version        = var.kubernetes_version
   automatic_channel_upgrade = var.automatic_channel_upgrade
