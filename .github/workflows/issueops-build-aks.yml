@@ -301,11 +301,21 @@ jobs:
           LOCATION="${{ steps.parse-issue.outputs.location }}"
           ENV="${{ needs.parse-command.outputs.environment }}"
           
+          # Location short code lookup (matching naming module)
+          declare -A LOCATION_MAP=(
+            ["eastus"]="eus" ["eastus2"]="eus2" ["westus"]="wus" ["westus2"]="wus2"
+            ["centralus"]="cus" ["canadacentral"]="cac" ["canadaeast"]="cae"
+            ["northeurope"]="neu" ["westeurope"]="weu" ["uksouth"]="uks"
+            ["australiaeast"]="aue" ["southeastasia"]="sea"
+          )
+          LOCATION_SHORT="${LOCATION_MAP[$LOCATION]:-${LOCATION:0:3}}"
+          
           # Construct expected resource names (matching naming module convention)
-          RG_NAME="rg-${ORG_PREFIX}-${APP_NAME}-${ENV}-${LOCATION}"
-          AKS_NAME="aks-${ORG_PREFIX}-${APP_NAME}-${ENV}-${LOCATION}"
-          VNET_NAME="vnet-${ORG_PREFIX}-${APP_NAME}-${ENV}-${LOCATION}"
-          ACR_NAME=$(echo "acr${ORG_PREFIX}${APP_NAME}${ENV}" | tr '[:upper:]' '[:lower:]' | tr -d '-' | cut -c1-50)
+          # Pattern: {prefix}-{app}-{location_short}-{env}-{resource_type}
+          RG_NAME="${ORG_PREFIX}-${APP_NAME}-${LOCATION_SHORT}-${ENV}-rg"
+          AKS_NAME="${ORG_PREFIX}-${APP_NAME}-${LOCATION_SHORT}-${ENV}-aks"
+          VNET_NAME="${ORG_PREFIX}-${APP_NAME}-${LOCATION_SHORT}-${ENV}-vnet"
+          ACR_NAME=$(echo "${ORG_PREFIX}${APP_NAME}${LOCATION_SHORT}${ENV}acr" | tr '[:upper:]' '[:lower:]' | tr -d '-' | cut -c1-50)
           
           echo "rg_name=${RG_NAME}" >> $GITHUB_OUTPUT
           echo "aks_name=${AKS_NAME}" >> $GITHUB_OUTPUT
