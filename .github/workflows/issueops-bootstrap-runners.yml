@@ -208,9 +208,10 @@ jobs:
           )
           ENV_CODE="${ENV_SHORT[$ENV]:-$ENV}"
           
-          # Clean prefix and app name (remove dashes and special chars)
-          PREFIX_CLEAN=$(echo "$ORG_PREFIX" | tr -d '-_' | tr '[:upper:]' '[:lower:]')
-          APP_NAME_CLEAN=$(echo "$APP_NAME" | tr -d '-_' | tr '[:upper:]' '[:lower:]')
+          # Clean prefix and app name (remove dashes, underscores, and special chars)
+          # Note: dash must be at the end to avoid being interpreted as an option
+          PREFIX_CLEAN=$(echo "$ORG_PREFIX" | tr -d '_-' | tr '[:upper:]' '[:lower:]')
+          APP_NAME_CLEAN=$(echo "$APP_NAME" | tr -d '_-' | tr '[:upper:]' '[:lower:]')
           
           # Naming pattern: {prefix}-{app}-{location_short}-{env_short}-{type}
           BASE_NAME="${ORG_PREFIX}-${APP_NAME}-${LOCATION_CODE}-${ENV_CODE}"
