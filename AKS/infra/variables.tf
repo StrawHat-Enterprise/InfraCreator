@@ -58,6 +58,18 @@ variable "admin_group_object_ids" {
   default     = []
 }
 
+variable "k8s_admin_object_id" {
+  description = "Azure AD User/Group Object ID to be granted Kubernetes Cluster Admin role"
+  type        = string
+  default     = ""
+}
+
+variable "deployment_spn_object_id" {
+  description = "Service Principal Object ID used for deployment (will get Contributor role)"
+  type        = string
+  default     = ""
+}
+
 # =============================================================================
 # Network Configuration
 # =============================================================================

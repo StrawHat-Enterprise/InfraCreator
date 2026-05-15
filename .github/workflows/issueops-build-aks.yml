@@ -12,8 +12,18 @@
 #   /plan-aks-prod    - Plan production environment
 #   /check-aks-dev    - Check if dev AKS cluster exists
 #   /check-aks-prod   - Check if prod AKS cluster exists
-#   /destroy-aks-dev  - Destroy development infrastructure
-#   /destroy-aks-prod - Destroy production infrastructure
+#   /destroy-aks-dev  - Destroy development infrastructure (via Terraform)
+#   /destroy-aks-prod - Destroy production infrastructure (via Terraform)
+#   /delete-all-dev   - FORCE DELETE entire dev resource group (bypasses Terraform)
+#   /delete-all-prod  - FORCE DELETE entire prod resource group (bypasses Terraform)
+#
+# Required Secrets:
+#   AZURE_CLIENT_ID        - Service Principal Client ID
+#   AZURE_TENANT_ID        - Azure AD Tenant ID
+#   AZURE_SUBSCRIPTION_ID  - Azure Subscription ID
+#   AZURE_SPN_OBJECT_ID    - Service Principal Object ID (for RBAC)
+#   K8S_ADMIN_OBJECT_ID    - Azure AD Object ID for K8s cluster admin access
+#   WINDOWS_ADMIN_PASSWORD - (Optional) Password for Windows node pools
 # =============================================================================
 
 name: "IssueOps: Build AKS Infrastructure"
@@ -54,6 +64,8 @@ permissions:
 
 env:
   TF_VAR_windows_admin_password: ${{ secrets.WINDOWS_ADMIN_PASSWORD }}
+  TF_VAR_k8s_admin_object_id: ${{ secrets.K8S_ADMIN_OBJECT_ID }}
+  TF_VAR_deployment_spn_object_id: ${{ secrets.AZURE_SPN_OBJECT_ID }}
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
@@ -124,6 +136,19 @@ jobs:
             echo "should_run=true" >> $GITHUB_OUTPUT
             echo "environment=prod" >> $GITHUB_OUTPUT
             echo "action=destroy" >> $GITHUB_OUTPUT
+            echo "tfvars_file=prod-linux-windows.tfvars" >> $GITHUB_OUTPUT
+            echo "check_only=false" >> $GITHUB_OUTPUT
+          # Check for delete-all commands (force delete entire resource group)
+          elif [[ "$COMMENT" =~ ^/delete-all-dev ]]; then
+            echo "should_run=true" >> $GITHUB_OUTPUT
+            echo "environment=dev" >> $GITHUB_OUTPUT
+            echo "action=delete-all" >> $GITHUB_OUTPUT
+            echo "tfvars_file=dev-linux.tfvars" >> $GITHUB_OUTPUT
+            echo "check_only=false" >> $GITHUB_OUTPUT
+          elif [[ "$COMMENT" =~ ^/delete-all-prod ]]; then
+            echo "should_run=true" >> $GITHUB_OUTPUT
+            echo "environment=prod" >> $GITHUB_OUTPUT
+            echo "action=delete-all" >> $GITHUB_OUTPUT
             echo "tfvars_file=prod-linux-windows.tfvars" >> $GITHUB_OUTPUT
             echo "check_only=false" >> $GITHUB_OUTPUT
           else
@@ -568,6 +593,143 @@ jobs:
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           ARM_USE_OIDC: true
+
+      # =======================================================================
+      # Delete-All: Force delete entire resource group (bypasses Terraform)
+      # =======================================================================
+      - name: Delete All - Confirm resource group exists
+        id: delete-all-check
+        if: needs.parse-command.outputs.action == 'delete-all'
+        run: |
+          RG_NAME="${{ steps.check-existing.outputs.rg_name }}"
+          echo "🔍 Checking if resource group exists: ${RG_NAME}"
+          
+          if az group show --name "$RG_NAME" &>/dev/null; then
+            echo "rg_exists=true" >> $GITHUB_OUTPUT
+            echo "✅ Resource group found, proceeding with deletion"
+            
+            # List all resources in the group for the report
+            echo "📋 Resources to be deleted:"
+            az resource list --resource-group "$RG_NAME" --query "[].{Name:name, Type:type}" -o table || true
+          else
+            echo "rg_exists=false" >> $GITHUB_OUTPUT
+            echo "⚠️ Resource group does not exist"
+          fi
+
+      - name: Delete All - Force delete resource group
+        id: delete-all
+        if: needs.parse-command.outputs.action == 'delete-all' && steps.delete-all-check.outputs.rg_exists == 'true'
+        run: |
+          RG_NAME="${{ steps.check-existing.outputs.rg_name }}"
+          
+          echo "🗑️ FORCE DELETING resource group: ${RG_NAME}"
+          echo "⚠️ This will delete ALL resources in the resource group!"
+          
+          # Force delete the resource group with all resources
+          if az group delete \
+            --name "$RG_NAME" \
+            --yes \
+            --no-wait; then
+            echo "✅ Resource group deletion initiated"
+            echo "delete_initiated=true" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Failed to delete resource group"
+            echo "delete_initiated=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
+          # Wait for deletion to complete (max 15 minutes)
+          echo "⏳ Waiting for resource group deletion to complete..."
+          for i in {1..30}; do
+            if ! az group show --name "$RG_NAME" &>/dev/null; then
+              echo "✅ Resource group deleted successfully"
+              echo "delete_complete=true" >> $GITHUB_OUTPUT
+              break
+            fi
+            echo "   Still deleting... (attempt $i/30)"
+            sleep 30
+          done
+          
+          # Verify deletion
+          if az group show --name "$RG_NAME" &>/dev/null; then
+            echo "⚠️ Resource group still exists (deletion may be in progress)"
+            echo "delete_complete=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Delete All - Clean up Terraform state
+        if: needs.parse-command.outputs.action == 'delete-all' && steps.delete-all-check.outputs.rg_exists == 'true'
+        run: |
+          SA_NAME="${{ steps.backend.outputs.sa_name }}"
+          CONTAINER="${{ steps.backend.outputs.container_name }}"
+          ENV="${{ needs.parse-command.outputs.environment }}"
+          STATE_FILE="aks-${ENV}.tfstate"
+          
+          echo "🧹 Cleaning up Terraform state file: ${STATE_FILE}"
+          
+          # Delete the state file from storage account
+          if az storage blob delete \
+            --account-name "$SA_NAME" \
+            --container-name "$CONTAINER" \
+            --name "$STATE_FILE" \
+            --auth-mode login 2>/dev/null; then
+            echo "✅ Terraform state file deleted"
+          else
+            echo "⚠️ Could not delete state file (may not exist or already deleted)"
+          fi
+
+      - name: Post delete-all success comment
+        if: success() && needs.parse-command.outputs.action == 'delete-all'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const deleteComplete = '${{ steps.delete-all.outputs.delete_complete }}' === 'true';
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `## 🗑️ Complete Infrastructure Deletion (${{ needs.parse-command.outputs.environment }})
+            
+            **Resource Group:** \`${{ steps.check-existing.outputs.rg_name }}\`
+            
+            ### Status
+            
+            | Item | Status |
+            |------|--------|
+            | Resource Group | ${deleteComplete ? '✅ Deleted' : '⏳ Deletion in progress'} |
+            | Terraform State | ✅ Cleaned up |
+            
+            ${deleteComplete 
+              ? '### ✅ All resources have been permanently deleted!\n\nTo recreate the infrastructure, use `/set-aks-backend` followed by `/build-aks-${{ needs.parse-command.outputs.environment }}`'
+              : '### ⏳ Deletion in progress\n\nThe resource group deletion may take a few more minutes to complete. You can check the status in the Azure Portal.'}
+            
+            ---
+            ⏱️ Completed at: ${new Date().toISOString()}`
+            });
+
+      - name: Post delete-all not found comment
+        if: needs.parse-command.outputs.action == 'delete-all' && steps.delete-all-check.outputs.rg_exists != 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `## ⚠️ Nothing to Delete (${{ needs.parse-command.outputs.environment }})
+            
+            **Resource Group:** \`${{ steps.check-existing.outputs.rg_name }}\`
+            
+            The resource group does not exist. Either:
+            - It was never created
+            - It was already deleted
+            - The naming convention has changed
+            
+            Use \`/check-aks-${{ needs.parse-command.outputs.environment }}\` to verify current state.
+            
+            ---
+            ⏱️ Checked at: ${new Date().toISOString()}`
+            });
 
       - name: Post apply success comment
         if: success() && needs.parse-command.outputs.action == 'apply'
