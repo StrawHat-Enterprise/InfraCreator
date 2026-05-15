@@ -1,0 +1,56 @@
+name: Burst Test - 20 Parallel Jobs
+
+on:
+  workflow_dispatch:
+    inputs:
+      job_duration:
+        description: 'How long each job should run (seconds)'
+        required: false
+        default: '300'
+
+jobs:
+  burst-test:
+    name: Job ${{ matrix.job_id }}
+    runs-on: straw-hat-runners-linux
+    strategy:
+      matrix:
+        job_id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+      fail-fast: false
+    
+    steps:
+      - name: Job Info
+        run: |
+          echo "🚀 Job ${{ matrix.job_id }} starting on runner: $RUNNER_NAME"
+          echo "Hostname: $(hostname)"
+          echo "Start time: $(date)"
+          echo "Duration: ${{ github.event.inputs.job_duration || '300' }} seconds (5 minutes)"
+          
+      - name: Checkout code
+        uses: actions/checkout@v4
+          
+      - name: Simulate long-running workload
+        run: |
+          DURATION=${{ github.event.inputs.job_duration || '300' }}
+          echo "⏳ Running workload for $DURATION seconds..."
+          
+          # Simulate CPU work in intervals
+          for i in $(seq 1 $((DURATION / 30))); do
+            echo "📊 Job ${{ matrix.job_id }} - Progress: $((i * 30))/$DURATION seconds"
+            echo "   Memory usage: $(free -h | grep Mem | awk '{print $3"/"$2}')"
+            echo "   CPU load: $(cat /proc/loadavg | awk '{print $1}')"
+            
+            # Do some actual work
+            dd if=/dev/urandom bs=1M count=10 2>/dev/null | md5sum > /dev/null
+            sleep 25
+          done
+          
+      - name: Docker test
+        run: |
+          echo "🐳 Testing Docker..."
+          docker run --rm alpine:latest sh -c "echo 'Container from Job ${{ matrix.job_id }}'"
+          
+      - name: Complete
+        run: |
+          echo "✅ Job ${{ matrix.job_id }} completed at $(date)"
+          echo "Runner: $RUNNER_NAME"
+          echo "Total runtime: ${{ github.event.inputs.job_duration || '300' }} seconds"
