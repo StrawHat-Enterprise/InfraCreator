@@ -387,7 +387,7 @@ jobs:
           ENV="${{ needs.parse-command.outputs.environment }}"
           TFVARS_FILE="environments/${{ needs.parse-command.outputs.tfvars_file }}"
           
-          # Read the base tfvars and override with issue values
+          # Create tfvars with issue-specific overrides first
           cat > terraform.tfvars <<EOF
           # Generated from Issue #${{ github.event.issue.number }}
           
@@ -408,12 +408,17 @@ jobs:
           }
           EOF
           
-          # Append the environment-specific settings from the base tfvars
+          # Copy the base tfvars, filtering out variables we've overridden
           echo "" >> terraform.tfvars
           echo "# Environment-specific settings from $TFVARS_FILE" >> terraform.tfvars
           
-          # Extract non-override settings from base tfvars
-          grep -E "^(vnet_|subnet_|create_nat|kubernetes_|automatic_|sku_|network_|service_cidr|dns_service|outbound_|system_node|additional_node|enable_windows|windows_admin_user|log_analytics|oms_|key_vault_|azure_policy|oidc_|workload_|acr_|storage_replication)" "$TFVARS_FILE" >> terraform.tfvars || true
+          # Use sed to remove overridden blocks and append the rest
+          # First, extract single-line settings that don't conflict
+          grep -E "^(vnet_address_space|subnet_|create_nat_gateway|kubernetes_version|automatic_channel_upgrade|sku_tier|network_profile_preset|service_cidr|dns_service_ip|outbound_type|enable_windows_node_pool|windows_admin_username|log_analytics_|oms_agent|key_vault_|azure_policy_|oidc_issuer|workload_identity|acr_sku|storage_replication)" "$TFVARS_FILE" >> terraform.tfvars 2>/dev/null || true
+          
+          # Now extract multi-line blocks (system_node_pool, additional_node_pools) using awk
+          awk '/^system_node_pool\s*=\s*\{/,/^\}/' "$TFVARS_FILE" >> terraform.tfvars 2>/dev/null || true
+          awk '/^additional_node_pools\s*=\s*\[/,/^\]/' "$TFVARS_FILE" >> terraform.tfvars 2>/dev/null || true
 
       - name: Terraform Init
         id: init
