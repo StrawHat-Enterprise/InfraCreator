@@ -52,11 +52,11 @@ jobs:
             echo "check_only=false" >> $GITHUB_OUTPUT
           elif [[ "$COMMENT" =~ ^/set-aks-backend ]]; then
             echo "should_run=true" >> $GITHUB_OUTPUT
-            echo "environment=shared" >> $GITHUB_OUTPUT
+            echo "environment=dev" >> $GITHUB_OUTPUT
             echo "check_only=false" >> $GITHUB_OUTPUT
           elif [[ "$COMMENT" =~ ^/check-backend ]]; then
             echo "should_run=true" >> $GITHUB_OUTPUT
-            echo "environment=shared" >> $GITHUB_OUTPUT
+            echo "environment=dev" >> $GITHUB_OUTPUT
             echo "check_only=true" >> $GITHUB_OUTPUT
           else
             echo "should_run=false" >> $GITHUB_OUTPUT
@@ -67,7 +67,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: parse-command
     if: needs.parse-command.outputs.should_run == 'true'
-    environment: ${{ needs.parse-command.outputs.environment != 'shared' && needs.parse-command.outputs.environment || '' }}
+    environment: ${{ needs.parse-command.outputs.environment }}
     
     steps:
       - name: Add reaction to comment
