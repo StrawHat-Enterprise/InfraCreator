@@ -1,18 +1,23 @@
 # =============================================================================
-# IssueOps: Bootstrap Flux & Deploy Action Runners
+# IssueOps: Bootstrap Flux & Deploy Action Runners (GitOps)
 # =============================================================================
 # Triggered by commenting on an AKS deployment issue (same issue as /build-aks)
 #
 # Supported commands:
-#   /bootstrap-flux-dev   - Bootstrap Flux on dev AKS cluster
-#   /bootstrap-flux-prod  - Bootstrap Flux on prod AKS cluster
-#   /deploy-arc-dev       - Deploy GitHub Action Runners on dev cluster
-#   /deploy-arc-prod      - Deploy GitHub Action Runners on prod cluster
+#   /bootstrap-flux-dev   - Bootstrap Flux + push secrets to Key Vault (dev)
+#   /bootstrap-flux-prod  - Bootstrap Flux + push secrets to Key Vault (prod)
+#   /sync-runners-dev     - Force sync runner deployment via Flux (dev)
+#   /sync-runners-prod    - Force sync runner deployment via Flux (prod)
 #   /status-runners-dev   - Check runner status on dev cluster
 #   /status-runners-prod  - Check runner status on prod cluster
+#
+# Architecture:
+#   - actions-runner-gitops: GitOps repo with Flux Kustomizations
+#   - actions-runner-helm: Helm charts published to GHCR
+#   - Azure Key Vault: Stores GH_PAT for External Secrets Operator
 # =============================================================================
 
-name: "IssueOps: Bootstrap Flux & Action Runners"
+name: "IssueOps: Bootstrap Flux & Action Runners (GitOps)"
 
 on:
   issue_comment:
@@ -23,6 +28,11 @@ permissions:
   contents: write
   id-token: write
   actions: read
+
+env:
+  GITOPS_REPO: "actions-runner-gitops"
+  HELM_REPO: "actions-runner-helm"
+  RUNNER_GROUP: "straw-hat-runners-linux"
 
 jobs:
   parse-command:
@@ -49,15 +59,15 @@ jobs:
             echo "should_run=true" >> $GITHUB_OUTPUT
             echo "environment=prod" >> $GITHUB_OUTPUT
             echo "action=bootstrap-flux" >> $GITHUB_OUTPUT
-          # Deploy ARC commands
-          elif [[ "$COMMENT" =~ ^/deploy-arc-dev ]]; then
+          # Sync runners commands (via GitOps)
+          elif [[ "$COMMENT" =~ ^/sync-runners-dev ]]; then
             echo "should_run=true" >> $GITHUB_OUTPUT
             echo "environment=dev" >> $GITHUB_OUTPUT
-            echo "action=deploy-arc" >> $GITHUB_OUTPUT
-          elif [[ "$COMMENT" =~ ^/deploy-arc-prod ]]; then
+            echo "action=sync-runners" >> $GITHUB_OUTPUT
+          elif [[ "$COMMENT" =~ ^/sync-runners-prod ]]; then
             echo "should_run=true" >> $GITHUB_OUTPUT
             echo "environment=prod" >> $GITHUB_OUTPUT
-            echo "action=deploy-arc" >> $GITHUB_OUTPUT
+            echo "action=sync-runners" >> $GITHUB_OUTPUT
           # Status commands
           elif [[ "$COMMENT" =~ ^/status-runners-dev ]]; then
             echo "should_run=true" >> $GITHUB_OUTPUT
@@ -101,11 +111,11 @@ jobs:
             switch(action) {
               case 'bootstrap-flux':
                 emoji = '🔄';
-                actionText = 'Bootstrapping Flux';
+                actionText = 'Bootstrapping Flux + Pushing Secrets to Key Vault';
                 break;
-              case 'deploy-arc':
-                emoji = '🏃';
-                actionText = 'Deploying Action Runners';
+              case 'sync-runners':
+                emoji = '🔃';
+                actionText = 'Syncing Runners via GitOps';
                 break;
               case 'status':
                 emoji = '📊';
@@ -126,6 +136,12 @@ jobs:
             **Environment:** ${env}
             **Action:** ${action}
             **Workflow Run:** [View Details](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
+            
+            ### GitOps Architecture
+            - 📦 **Helm Charts:** \`${{ env.HELM_REPO }}\` → GHCR
+            - 🔄 **GitOps Repo:** \`${{ env.GITOPS_REPO }}\`
+            - 🔐 **Secrets:** Azure Key Vault → ESO → Cluster
+            - 🏃 **Runner Group:** \`${{ env.RUNNER_GROUP }}\`
             
             ⏳ ${actionText}...`
             });
@@ -167,7 +183,7 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Get AKS credentials
+      - name: Get AKS credentials and Key Vault info
         id: aks-creds
         run: |
           ORG_PREFIX="${{ steps.parse-issue.outputs.org_prefix }}"
@@ -177,9 +193,14 @@ jobs:
           
           RG_NAME="rg-${ORG_PREFIX}-${APP_NAME}-${ENV}-${LOCATION}"
           AKS_NAME="aks-${ORG_PREFIX}-${APP_NAME}-${ENV}-${LOCATION}"
+          KV_NAME="kv-${ORG_PREFIX}-${APP_NAME}-${ENV}-${LOCATION}"
+          
+          # Truncate Key Vault name if > 24 chars
+          KV_NAME=$(echo "$KV_NAME" | cut -c1-24)
           
           echo "rg_name=${RG_NAME}" >> $GITHUB_OUTPUT
           echo "aks_name=${AKS_NAME}" >> $GITHUB_OUTPUT
+          echo "kv_name=${KV_NAME}" >> $GITHUB_OUTPUT
           
           echo "🔑 Getting AKS credentials..."
           az aks get-credentials \
@@ -187,10 +208,27 @@ jobs:
             --name "$AKS_NAME" \
             --overwrite-existing
           
+          # Get AKS OIDC Issuer URL for workload identity
+          OIDC_ISSUER=$(az aks show \
+            --resource-group "$RG_NAME" \
+            --name "$AKS_NAME" \
+            --query "oidcIssuerProfile.issuerUrl" -o tsv)
+          echo "oidc_issuer=${OIDC_ISSUER}" >> $GITHUB_OUTPUT
+          
+          # Get Managed Identity Client ID (created by Terraform)
+          MI_NAME="id-${ORG_PREFIX}-${APP_NAME}-${ENV}-${LOCATION}"
+          MI_CLIENT_ID=$(az identity show \
+            --resource-group "$RG_NAME" \
+            --name "$MI_NAME" \
+            --query "clientId" -o tsv 2>/dev/null || echo "")
+          echo "mi_client_id=${MI_CLIENT_ID}" >> $GITHUB_OUTPUT
+          
           echo "✅ Connected to cluster: ${AKS_NAME}"
+          echo "🔐 Key Vault: ${KV_NAME}"
+          echo "🆔 Managed Identity: ${MI_CLIENT_ID}"
 
       # =====================================================================
-      # FLUX BOOTSTRAP
+      # FLUX BOOTSTRAP + KEY VAULT SECRETS
       # =====================================================================
       - name: Install Flux CLI
         if: needs.parse-command.outputs.action == 'bootstrap-flux'
@@ -198,7 +236,61 @@ jobs:
           curl -s https://fluxcd.io/install.sh | sudo bash
           flux --version
 
-      - name: Bootstrap Flux
+      - name: Push secrets to Azure Key Vault
+        if: needs.parse-command.outputs.action == 'bootstrap-flux'
+        run: |
+          KV_NAME="${{ steps.aks-creds.outputs.kv_name }}"
+          
+          echo "🔐 Pushing secrets to Azure Key Vault: ${KV_NAME}"
+          
+          # Push GitHub PAT to Key Vault (for ESO to sync)
+          az keyvault secret set \
+            --vault-name "$KV_NAME" \
+            --name "github-pat" \
+            --value "${{ secrets.GH_PAT }}" \
+            --output none
+          
+          echo "✅ Secret 'github-pat' pushed to Key Vault"
+          
+          # Optionally push other secrets (ACR credentials, etc.)
+          # az keyvault secret set \
+          #   --vault-name "$KV_NAME" \
+          #   --name "acr-password" \
+          #   --value "${{ secrets.ACR_PASSWORD }}" \
+          #   --output none
+
+      - name: Setup Workload Identity Federation
+        if: needs.parse-command.outputs.action == 'bootstrap-flux'
+        run: |
+          RG_NAME="${{ steps.aks-creds.outputs.rg_name }}"
+          MI_CLIENT_ID="${{ steps.aks-creds.outputs.mi_client_id }}"
+          OIDC_ISSUER="${{ steps.aks-creds.outputs.oidc_issuer }}"
+          ORG_PREFIX="${{ steps.parse-issue.outputs.org_prefix }}"
+          APP_NAME="${{ steps.parse-issue.outputs.app_name }}"
+          LOCATION="${{ steps.parse-issue.outputs.location }}"
+          ENV="${{ needs.parse-command.outputs.environment }}"
+          
+          MI_NAME="id-${ORG_PREFIX}-${APP_NAME}-${ENV}-${LOCATION}"
+          
+          if [[ -n "$MI_CLIENT_ID" && -n "$OIDC_ISSUER" ]]; then
+            echo "🔗 Setting up Workload Identity Federation..."
+            
+            # Create federated credential for external-secrets SA
+            az identity federated-credential create \
+              --name "fedcred-external-secrets" \
+              --identity-name "$MI_NAME" \
+              --resource-group "$RG_NAME" \
+              --issuer "$OIDC_ISSUER" \
+              --subject "system:serviceaccount:external-secrets:external-secrets-sa" \
+              --audiences "api://AzureADTokenExchange" \
+              2>/dev/null || echo "Federated credential may already exist"
+            
+            echo "✅ Workload Identity Federation configured"
+          else
+            echo "⚠️ Skipping Workload Identity setup - missing MI or OIDC issuer"
+          fi
+
+      - name: Bootstrap Flux with GitOps repo
         if: needs.parse-command.outputs.action == 'bootstrap-flux'
         env:
           GITHUB_TOKEN: ${{ secrets.GH_PAT }}
@@ -208,17 +300,36 @@ jobs:
           
           echo "🔄 Bootstrapping Flux..."
           echo "   Owner: ${{ github.repository_owner }}"
-          echo "   Repository: flux-gitops"
+          echo "   Repository: ${{ env.GITOPS_REPO }}"
           echo "   Path: ${CLUSTER_PATH}"
           
           flux bootstrap github \
             --owner="${{ github.repository_owner }}" \
-            --repository="flux-gitops" \
+            --repository="${{ env.GITOPS_REPO }}" \
             --branch="main" \
             --path="${CLUSTER_PATH}" \
             --personal=false \
             --components-extra=image-reflector-controller,image-automation-controller \
             || echo "Flux bootstrap completed (may already exist)"
+
+      - name: Apply cluster-specific configuration
+        if: needs.parse-command.outputs.action == 'bootstrap-flux'
+        run: |
+          ENV="${{ needs.parse-command.outputs.environment }}"
+          KV_NAME="${{ steps.aks-creds.outputs.kv_name }}"
+          MI_CLIENT_ID="${{ steps.aks-creds.outputs.mi_client_id }}"
+          
+          echo "📝 Creating Flux substitution ConfigMap..."
+          
+          # Create ConfigMap for Flux variable substitution
+          kubectl create configmap cluster-config \
+            --namespace=flux-system \
+            --from-literal=KEYVAULT_URL="https://${KV_NAME}.vault.azure.net" \
+            --from-literal=AZURE_TENANT_ID="${{ secrets.AZURE_TENANT_ID }}" \
+            --from-literal=MANAGED_IDENTITY_CLIENT_ID="${MI_CLIENT_ID}" \
+            --dry-run=client -o yaml | kubectl apply -f -
+          
+          echo "✅ Cluster configuration applied"
 
       - name: Verify Flux installation
         if: needs.parse-command.outputs.action == 'bootstrap-flux'
@@ -229,85 +340,49 @@ jobs:
           echo ""
           echo "📦 Flux components:"
           kubectl get pods -n flux-system
+          
+          echo ""
+          echo "📋 Flux Kustomizations:"
+          kubectl get kustomizations -n flux-system
 
       # =====================================================================
-      # DEPLOY ACTION RUNNER CONTROLLER (ARC)
+      # SYNC RUNNERS (via GitOps)
       # =====================================================================
-      - name: Install Helm
-        if: needs.parse-command.outputs.action == 'deploy-arc'
-        uses: azure/setup-helm@v3
-        with:
-          version: 'latest'
-
-      - name: Create ARC namespaces
-        if: needs.parse-command.outputs.action == 'deploy-arc'
+      - name: Install Flux CLI
+        if: needs.parse-command.outputs.action == 'sync-runners'
         run: |
-          kubectl create namespace arc-systems --dry-run=client -o yaml | kubectl apply -f -
-          kubectl create namespace arc-runners --dry-run=client -o yaml | kubectl apply -f -
+          curl -s https://fluxcd.io/install.sh | sudo bash
+          flux --version
 
-      - name: Create GitHub PAT Secret
-        if: needs.parse-command.outputs.action == 'deploy-arc'
+      - name: Force reconcile GitOps
+        if: needs.parse-command.outputs.action == 'sync-runners'
         run: |
-          # Create secret for GitHub PAT authentication
-          kubectl create secret generic arc-github-secret \
-            --namespace=arc-systems \
-            --from-literal=github_token="${{ secrets.GH_PAT }}" \
-            --dry-run=client -o yaml | kubectl apply -f -
-
-      - name: Deploy ARC Controller
-        if: needs.parse-command.outputs.action == 'deploy-arc'
-        run: |
-          echo "🚀 Deploying Action Runner Controller..."
+          echo "🔃 Force reconciling Flux resources..."
           
-          helm install arc \
-            --namespace arc-systems \
-            --create-namespace \
-            oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller \
-            --version 0.9.3 \
-            --wait \
-            || helm upgrade arc \
-              --namespace arc-systems \
-              oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller \
-              --version 0.9.3 \
-              --wait
-
-      - name: Deploy Runner Scale Set
-        if: needs.parse-command.outputs.action == 'deploy-arc'
-        run: |
-          ENV="${{ needs.parse-command.outputs.environment }}"
-          GITHUB_CONFIG_URL="https://github.com/${{ github.repository_owner }}"
+          # Reconcile GitRepository
+          flux reconcile source git flux-system
           
-          echo "🏃 Deploying Runner Scale Set..."
-          echo "   GitHub Config URL: ${GITHUB_CONFIG_URL}"
-          echo "   Environment: ${ENV}"
+          # Reconcile Kustomizations
+          flux reconcile kustomization infrastructure-sources || true
+          flux reconcile kustomization infrastructure-controllers || true
+          flux reconcile kustomization apps-runners || true
           
-          helm install arc-runner-set-${ENV} \
-            --namespace arc-runners \
-            --create-namespace \
-            oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set \
-            --version 0.9.3 \
-            --set githubConfigUrl="${GITHUB_CONFIG_URL}" \
-            --set githubConfigSecret=arc-github-secret \
-            --set minRunners=1 \
-            --set maxRunners=10 \
-            --set runnerGroup="aks-${ENV}-runners" \
-            --set containerMode.type="dind" \
-            --wait \
-            || helm upgrade arc-runner-set-${ENV} \
-              --namespace arc-runners \
-              oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set \
-              --version 0.9.3 \
-              --set githubConfigUrl="${GITHUB_CONFIG_URL}" \
-              --set githubConfigSecret=arc-github-secret \
-              --set minRunners=1 \
-              --set maxRunners=10 \
-              --set runnerGroup="aks-${ENV}-runners" \
-              --set containerMode.type="dind" \
-              --wait
+          echo ""
+          echo "📋 Current Kustomization status:"
+          kubectl get kustomizations -n flux-system
+          
+          echo ""
+          echo "📦 HelmRelease status:"
+          kubectl get helmreleases -A
 
       # =====================================================================
       # STATUS CHECK
       # =====================================================================
+      - name: Install Flux CLI
+        if: needs.parse-command.outputs.action == 'status'
+        run: |
+          curl -s https://fluxcd.io/install.sh | sudo bash
+
       - name: Check runner status
         if: needs.parse-command.outputs.action == 'status'
         id: status
@@ -319,10 +394,47 @@ jobs:
           if kubectl get ns flux-system &>/dev/null; then
             echo "✅ Flux is installed" >> status.md
             echo '```' >> status.md
-            kubectl get pods -n flux-system >> status.md 2>&1 || true
+            flux check >> status.md 2>&1 || true
+            echo '```' >> status.md
+            
+            echo "" >> status.md
+            echo "#### Kustomizations" >> status.md
+            echo '```' >> status.md
+            kubectl get kustomizations -n flux-system >> status.md 2>&1 || true
+            echo '```' >> status.md
+            
+            echo "" >> status.md
+            echo "#### HelmReleases" >> status.md
+            echo '```' >> status.md
+            kubectl get helmreleases -A >> status.md 2>&1 || true
             echo '```' >> status.md
           else
             echo "❌ Flux is not installed" >> status.md
+          fi
+          
+          echo "" >> status.md
+          
+          # Check External Secrets
+          echo "### External Secrets Status" >> status.md
+          if kubectl get ns external-secrets &>/dev/null; then
+            echo "✅ External Secrets Operator installed" >> status.md
+            echo '```' >> status.md
+            kubectl get pods -n external-secrets >> status.md 2>&1 || true
+            echo '```' >> status.md
+            
+            echo "" >> status.md
+            echo "#### ClusterSecretStores" >> status.md
+            echo '```' >> status.md
+            kubectl get clustersecretstores >> status.md 2>&1 || true
+            echo '```' >> status.md
+            
+            echo "" >> status.md
+            echo "#### ExternalSecrets" >> status.md
+            echo '```' >> status.md
+            kubectl get externalsecrets -A >> status.md 2>&1 || true
+            echo '```' >> status.md
+          else
+            echo "❌ External Secrets Operator not installed" >> status.md
           fi
           
           echo "" >> status.md
@@ -374,41 +486,53 @@ jobs:
             const action = '${{ needs.parse-command.outputs.action }}';
             const env = '${{ needs.parse-command.outputs.environment }}';
             const aksName = '${{ steps.aks-creds.outputs.aks_name }}';
+            const kvName = '${{ steps.aks-creds.outputs.kv_name }}';
+            const gitopsRepo = '${{ env.GITOPS_REPO }}';
+            const helmRepo = '${{ env.HELM_REPO }}';
+            const runnerGroup = '${{ env.RUNNER_GROUP }}';
             
             let emoji, title, content;
             
             switch(action) {
               case 'bootstrap-flux':
                 emoji = '✅';
-                title = 'Flux Bootstrap Complete';
+                title = 'Flux Bootstrap + Key Vault Secrets Complete';
                 content = `
             **Cluster:** \`${aksName}\`
-            **GitOps Repo:** \`${{ github.repository_owner }}/flux-gitops\`
+            **GitOps Repo:** \`${{ github.repository_owner }}/${gitopsRepo}\`
+            **Helm Charts:** \`${{ github.repository_owner }}/${helmRepo}\` → GHCR
+            **Key Vault:** \`${kvName}\`
             **Path:** \`clusters/aks-${env}\`
             
+            ### What was configured:
+            1. ✅ Flux bootstrapped with GitOps repo
+            2. ✅ GitHub PAT pushed to Azure Key Vault (\`github-pat\`)
+            3. ✅ Workload Identity Federation for ESO
+            4. ✅ Cluster config ConfigMap created
+            
+            ### GitOps Flow:
+            \`\`\`
+            GitOps Repo → Flux → HelmReleases → GHCR Charts → Cluster
+                                      ↓
+                          ExternalSecrets → Key Vault → Secrets
+            \`\`\`
+            
             ### Next Steps
-            1. Push your Kubernetes manifests to the GitOps repo
-            2. Flux will automatically sync them to the cluster
-            3. Deploy action runners: \`/deploy-arc-${env}\`
+            1. Flux will automatically deploy cert-manager, ESO, and ARC
+            2. ESO will sync \`github-pat\` from Key Vault to cluster
+            3. ARC will register runners with group: \`${runnerGroup}\`
+            4. Check status: \`/status-runners-${env}\`
+            5. Force sync: \`/sync-runners-${env}\`
             `;
                 break;
               
-              case 'deploy-arc':
+              case 'sync-runners':
                 emoji = '✅';
-                title = 'Action Runners Deployed';
+                title = 'GitOps Sync Complete';
                 content = `
             **Cluster:** \`${aksName}\`
-            **Runner Group:** \`aks-${env}-runners\`
-            **Min Runners:** 1
-            **Max Runners:** 10
             
-            ### How to Use
-            Add this to your workflow to use self-hosted runners:
-            \`\`\`yaml
-            jobs:
-              build:
-                runs-on: aks-${env}-runners
-            \`\`\`
+            All Flux Kustomizations have been reconciled.
             
             ### Commands
             - Check status: \`/status-runners-${env}\`
@@ -446,6 +570,7 @@ jobs:
           script: |
             const action = '${{ needs.parse-command.outputs.action }}';
             const env = '${{ needs.parse-command.outputs.environment }}';
+            const gitopsRepo = '${{ env.GITOPS_REPO }}';
             
             await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -460,6 +585,15 @@ jobs:
             ### Troubleshooting
             1. Ensure AKS cluster exists: \`/check-aks-${env}\`
             2. Check that \`GH_PAT\` secret is configured with scopes: repo, admin:org, workflow
+            3. Ensure Key Vault exists and Service Principal has access
+            4. Verify GitOps repo exists: \`${{ github.repository_owner }}/${gitopsRepo}\`
+            5. Check Managed Identity has Key Vault Secrets User role
+            
+            ### Required Secrets
+            - \`AZURE_CLIENT_ID\` - Service Principal/Managed Identity Client ID
+            - \`AZURE_TENANT_ID\` - Azure AD Tenant ID
+            - \`AZURE_SUBSCRIPTION_ID\` - Azure Subscription ID
+            - \`GH_PAT\` - GitHub PAT with repo, admin:org, workflow scopes
             
             ---
             ⏱️ Failed at: ${new Date().toISOString()}`
