@@ -1,0 +1,472 @@
+# =============================================================================
+# IssueOps: Bootstrap Flux & Deploy Action Runners
+# =============================================================================
+# Triggered by commenting on an AKS deployment issue (same issue as /build-aks)
+#
+# Supported commands:
+#   /bootstrap-flux-dev   - Bootstrap Flux on dev AKS cluster
+#   /bootstrap-flux-prod  - Bootstrap Flux on prod AKS cluster
+#   /deploy-arc-dev       - Deploy GitHub Action Runners on dev cluster
+#   /deploy-arc-prod      - Deploy GitHub Action Runners on prod cluster
+#   /status-runners-dev   - Check runner status on dev cluster
+#   /status-runners-prod  - Check runner status on prod cluster
+# =============================================================================
+
+name: "IssueOps: Bootstrap Flux & Action Runners"
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  issues: write
+  contents: write
+  id-token: write
+  actions: read
+
+jobs:
+  parse-command:
+    name: Parse Command
+    runs-on: ubuntu-latest
+    if: |
+      contains(github.event.issue.labels.*.name, 'aks')
+    outputs:
+      should_run: ${{ steps.parse.outputs.should_run }}
+      environment: ${{ steps.parse.outputs.environment }}
+      action: ${{ steps.parse.outputs.action }}
+    steps:
+      - name: Parse command
+        id: parse
+        run: |
+          COMMENT="${{ github.event.comment.body }}"
+          
+          # Bootstrap Flux commands
+          if [[ "$COMMENT" =~ ^/bootstrap-flux-dev ]]; then
+            echo "should_run=true" >> $GITHUB_OUTPUT
+            echo "environment=dev" >> $GITHUB_OUTPUT
+            echo "action=bootstrap-flux" >> $GITHUB_OUTPUT
+          elif [[ "$COMMENT" =~ ^/bootstrap-flux-prod ]]; then
+            echo "should_run=true" >> $GITHUB_OUTPUT
+            echo "environment=prod" >> $GITHUB_OUTPUT
+            echo "action=bootstrap-flux" >> $GITHUB_OUTPUT
+          # Deploy ARC commands
+          elif [[ "$COMMENT" =~ ^/deploy-arc-dev ]]; then
+            echo "should_run=true" >> $GITHUB_OUTPUT
+            echo "environment=dev" >> $GITHUB_OUTPUT
+            echo "action=deploy-arc" >> $GITHUB_OUTPUT
+          elif [[ "$COMMENT" =~ ^/deploy-arc-prod ]]; then
+            echo "should_run=true" >> $GITHUB_OUTPUT
+            echo "environment=prod" >> $GITHUB_OUTPUT
+            echo "action=deploy-arc" >> $GITHUB_OUTPUT
+          # Status commands
+          elif [[ "$COMMENT" =~ ^/status-runners-dev ]]; then
+            echo "should_run=true" >> $GITHUB_OUTPUT
+            echo "environment=dev" >> $GITHUB_OUTPUT
+            echo "action=status" >> $GITHUB_OUTPUT
+          elif [[ "$COMMENT" =~ ^/status-runners-prod ]]; then
+            echo "should_run=true" >> $GITHUB_OUTPUT
+            echo "environment=prod" >> $GITHUB_OUTPUT
+            echo "action=status" >> $GITHUB_OUTPUT
+          else
+            echo "should_run=false" >> $GITHUB_OUTPUT
+          fi
+
+  bootstrap-runners:
+    name: Bootstrap (${{ needs.parse-command.outputs.environment }}) - ${{ needs.parse-command.outputs.action }}
+    runs-on: ubuntu-latest
+    needs: parse-command
+    if: needs.parse-command.outputs.should_run == 'true'
+    environment: ${{ needs.parse-command.outputs.environment }}
+    
+    steps:
+      - name: Add reaction to comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: context.payload.comment.id,
+              content: 'rocket'
+            });
+
+      - name: Add processing comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const action = '${{ needs.parse-command.outputs.action }}';
+            const env = '${{ needs.parse-command.outputs.environment }}';
+            
+            let emoji, actionText;
+            switch(action) {
+              case 'bootstrap-flux':
+                emoji = '🔄';
+                actionText = 'Bootstrapping Flux';
+                break;
+              case 'deploy-arc':
+                emoji = '🏃';
+                actionText = 'Deploying Action Runners';
+                break;
+              case 'status':
+                emoji = '📊';
+                actionText = 'Checking Runner Status';
+                break;
+              default:
+                emoji = '⚙️';
+                actionText = 'Processing';
+            }
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `## ${emoji} ${actionText} (${env})
+            
+            **Triggered by:** @${context.payload.comment.user.login}
+            **Environment:** ${env}
+            **Action:** ${action}
+            **Workflow Run:** [View Details](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
+            
+            ⏳ ${actionText}...`
+            });
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Parse issue body for configuration
+        id: parse-issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = await github.rest.issues.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number
+            });
+            
+            const body = issue.data.body;
+            
+            const getField = (label) => {
+              const regex = new RegExp(`### ${label}\\s*\\n\\s*([^\\n#]+)`, 'i');
+              const match = body.match(regex);
+              return match ? match[1].trim() : '';
+            };
+            
+            const orgPrefix = getField('Organization Prefix') || 'acme';
+            const location = getField('Azure Region') || 'eastus';
+            const appName = getField('Application Name') || 'platform';
+            
+            core.setOutput('org_prefix', orgPrefix);
+            core.setOutput('location', location);
+            core.setOutput('app_name', appName);
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Get AKS credentials
+        id: aks-creds
+        run: |
+          ORG_PREFIX="${{ steps.parse-issue.outputs.org_prefix }}"
+          APP_NAME="${{ steps.parse-issue.outputs.app_name }}"
+          LOCATION="${{ steps.parse-issue.outputs.location }}"
+          ENV="${{ needs.parse-command.outputs.environment }}"
+          
+          RG_NAME="rg-${ORG_PREFIX}-${APP_NAME}-${ENV}-${LOCATION}"
+          AKS_NAME="aks-${ORG_PREFIX}-${APP_NAME}-${ENV}-${LOCATION}"
+          
+          echo "rg_name=${RG_NAME}" >> $GITHUB_OUTPUT
+          echo "aks_name=${AKS_NAME}" >> $GITHUB_OUTPUT
+          
+          echo "🔑 Getting AKS credentials..."
+          az aks get-credentials \
+            --resource-group "$RG_NAME" \
+            --name "$AKS_NAME" \
+            --overwrite-existing
+          
+          echo "✅ Connected to cluster: ${AKS_NAME}"
+
+      # =====================================================================
+      # FLUX BOOTSTRAP
+      # =====================================================================
+      - name: Install Flux CLI
+        if: needs.parse-command.outputs.action == 'bootstrap-flux'
+        run: |
+          curl -s https://fluxcd.io/install.sh | sudo bash
+          flux --version
+
+      - name: Bootstrap Flux
+        if: needs.parse-command.outputs.action == 'bootstrap-flux'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          ENV="${{ needs.parse-command.outputs.environment }}"
+          CLUSTER_PATH="clusters/aks-${ENV}"
+          
+          echo "🔄 Bootstrapping Flux..."
+          echo "   Owner: ${{ github.repository_owner }}"
+          echo "   Repository: flux-gitops"
+          echo "   Path: ${CLUSTER_PATH}"
+          
+          flux bootstrap github \
+            --owner="${{ github.repository_owner }}" \
+            --repository="flux-gitops" \
+            --branch="main" \
+            --path="${CLUSTER_PATH}" \
+            --personal=false \
+            --components-extra=image-reflector-controller,image-automation-controller \
+            || echo "Flux bootstrap completed (may already exist)"
+
+      - name: Verify Flux installation
+        if: needs.parse-command.outputs.action == 'bootstrap-flux'
+        run: |
+          echo "🔍 Verifying Flux installation..."
+          flux check
+          
+          echo ""
+          echo "📦 Flux components:"
+          kubectl get pods -n flux-system
+
+      # =====================================================================
+      # DEPLOY ACTION RUNNER CONTROLLER (ARC)
+      # =====================================================================
+      - name: Install Helm
+        if: needs.parse-command.outputs.action == 'deploy-arc'
+        uses: azure/setup-helm@v3
+        with:
+          version: 'latest'
+
+      - name: Create ARC namespaces
+        if: needs.parse-command.outputs.action == 'deploy-arc'
+        run: |
+          kubectl create namespace arc-systems --dry-run=client -o yaml | kubectl apply -f -
+          kubectl create namespace arc-runners --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Create GitHub App Secret
+        if: needs.parse-command.outputs.action == 'deploy-arc'
+        run: |
+          # Create secret for GitHub App authentication
+          kubectl create secret generic arc-github-secret \
+            --namespace=arc-systems \
+            --from-literal=github_app_id="${{ secrets.GH_APP_ID }}" \
+            --from-literal=github_app_installation_id="${{ secrets.GH_APP_INSTALLATION_ID }}" \
+            --from-literal=github_app_private_key="${{ secrets.GH_APP_PRIVATE_KEY }}" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Deploy ARC Controller
+        if: needs.parse-command.outputs.action == 'deploy-arc'
+        run: |
+          echo "🚀 Deploying Action Runner Controller..."
+          
+          helm install arc \
+            --namespace arc-systems \
+            --create-namespace \
+            oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller \
+            --version 0.9.3 \
+            --wait \
+            || helm upgrade arc \
+              --namespace arc-systems \
+              oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller \
+              --version 0.9.3 \
+              --wait
+
+      - name: Deploy Runner Scale Set
+        if: needs.parse-command.outputs.action == 'deploy-arc'
+        run: |
+          ENV="${{ needs.parse-command.outputs.environment }}"
+          GITHUB_CONFIG_URL="https://github.com/${{ github.repository_owner }}"
+          
+          echo "🏃 Deploying Runner Scale Set..."
+          echo "   GitHub Config URL: ${GITHUB_CONFIG_URL}"
+          echo "   Environment: ${ENV}"
+          
+          helm install arc-runner-set-${ENV} \
+            --namespace arc-runners \
+            --create-namespace \
+            oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set \
+            --version 0.9.3 \
+            --set githubConfigUrl="${GITHUB_CONFIG_URL}" \
+            --set githubConfigSecret=arc-github-secret \
+            --set minRunners=1 \
+            --set maxRunners=10 \
+            --set runnerGroup="aks-${ENV}-runners" \
+            --set containerMode.type="dind" \
+            --wait \
+            || helm upgrade arc-runner-set-${ENV} \
+              --namespace arc-runners \
+              oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set \
+              --version 0.9.3 \
+              --set githubConfigUrl="${GITHUB_CONFIG_URL}" \
+              --set githubConfigSecret=arc-github-secret \
+              --set minRunners=1 \
+              --set maxRunners=10 \
+              --set runnerGroup="aks-${ENV}-runners" \
+              --set containerMode.type="dind" \
+              --wait
+
+      # =====================================================================
+      # STATUS CHECK
+      # =====================================================================
+      - name: Check runner status
+        if: needs.parse-command.outputs.action == 'status'
+        id: status
+        run: |
+          echo "📊 Checking runner status..."
+          
+          # Check Flux status
+          echo "### Flux Status" >> status.md
+          if kubectl get ns flux-system &>/dev/null; then
+            echo "✅ Flux is installed" >> status.md
+            echo '```' >> status.md
+            kubectl get pods -n flux-system >> status.md 2>&1 || true
+            echo '```' >> status.md
+          else
+            echo "❌ Flux is not installed" >> status.md
+          fi
+          
+          echo "" >> status.md
+          
+          # Check ARC Controller
+          echo "### ARC Controller Status" >> status.md
+          if kubectl get ns arc-systems &>/dev/null; then
+            echo "✅ ARC Controller namespace exists" >> status.md
+            echo '```' >> status.md
+            kubectl get pods -n arc-systems >> status.md 2>&1 || true
+            echo '```' >> status.md
+          else
+            echo "❌ ARC Controller not installed" >> status.md
+          fi
+          
+          echo "" >> status.md
+          
+          # Check Runners
+          echo "### Action Runners Status" >> status.md
+          if kubectl get ns arc-runners &>/dev/null; then
+            echo "✅ Runner namespace exists" >> status.md
+            echo '```' >> status.md
+            kubectl get pods -n arc-runners >> status.md 2>&1 || true
+            echo '```' >> status.md
+            
+            echo "" >> status.md
+            echo "#### Helm Releases" >> status.md
+            echo '```' >> status.md
+            helm list -n arc-systems >> status.md 2>&1 || true
+            helm list -n arc-runners >> status.md 2>&1 || true
+            echo '```' >> status.md
+          else
+            echo "❌ Runners not installed" >> status.md
+          fi
+          
+          cat status.md
+          echo "status_content<<EOF" >> $GITHUB_OUTPUT
+          cat status.md >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      # =====================================================================
+      # POST RESULTS
+      # =====================================================================
+      - name: Post success comment
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const action = '${{ needs.parse-command.outputs.action }}';
+            const env = '${{ needs.parse-command.outputs.environment }}';
+            const aksName = '${{ steps.aks-creds.outputs.aks_name }}';
+            
+            let emoji, title, content;
+            
+            switch(action) {
+              case 'bootstrap-flux':
+                emoji = '✅';
+                title = 'Flux Bootstrap Complete';
+                content = `
+            **Cluster:** \`${aksName}\`
+            **GitOps Repo:** \`${{ github.repository_owner }}/flux-gitops\`
+            **Path:** \`clusters/aks-${env}\`
+            
+            ### Next Steps
+            1. Push your Kubernetes manifests to the GitOps repo
+            2. Flux will automatically sync them to the cluster
+            3. Deploy action runners: \`/deploy-arc-${env}\`
+            `;
+                break;
+              
+              case 'deploy-arc':
+                emoji = '✅';
+                title = 'Action Runners Deployed';
+                content = `
+            **Cluster:** \`${aksName}\`
+            **Runner Group:** \`aks-${env}-runners\`
+            **Min Runners:** 1
+            **Max Runners:** 10
+            
+            ### How to Use
+            Add this to your workflow to use self-hosted runners:
+            \`\`\`yaml
+            jobs:
+              build:
+                runs-on: aks-${env}-runners
+            \`\`\`
+            
+            ### Commands
+            - Check status: \`/status-runners-${env}\`
+            `;
+                break;
+              
+              case 'status':
+                emoji = '📊';
+                title = 'Runner Status Report';
+                content = `${{ steps.status.outputs.status_content }}`;
+                break;
+              
+              default:
+                emoji = '✅';
+                title = 'Action Complete';
+                content = 'Operation completed successfully.';
+            }
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `## ${emoji} ${title} (${env})
+            
+            ${content}
+            
+            ---
+            ⏱️ Completed at: ${new Date().toISOString()}`
+            });
+
+      - name: Post failure comment
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const action = '${{ needs.parse-command.outputs.action }}';
+            const env = '${{ needs.parse-command.outputs.environment }}';
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `## ❌ ${action} Failed (${env})
+            
+            The operation encountered an error.
+            
+            **Workflow Run:** [View Logs](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
+            
+            ### Troubleshooting
+            1. Ensure AKS cluster exists: \`/check-aks-${env}\`
+            2. Check that required secrets are configured:
+               - \`GH_PAT\` - GitHub Personal Access Token (for Flux)
+               - \`GH_APP_ID\` - GitHub App ID (for ARC)
+               - \`GH_APP_INSTALLATION_ID\` - GitHub App Installation ID
+               - \`GH_APP_PRIVATE_KEY\` - GitHub App Private Key
+            
+            ---
+            ⏱️ Failed at: ${new Date().toISOString()}`
+            });

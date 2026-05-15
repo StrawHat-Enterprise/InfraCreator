@@ -10,21 +10,38 @@ body:
       value: |
         ## 🚀 AKS Infrastructure Deployment Request
         
-        This issue enables IssueOps for deploying AKS infrastructure.
+        This issue enables IssueOps for deploying AKS infrastructure and bootstrapping GitOps with action runners.
         
-        ### Available Commands
-        
-        Comment on this issue with the following commands to trigger deployments:
+        ### 🏗️ Infrastructure Commands
         
         | Command | Description |
         |---------|-------------|
         | `/set-aks-backend` | Initialize the Terraform backend (storage account for state files) |
         | `/build-aks-dev` | Deploy AKS infrastructure for **development** environment |
         | `/build-aks-prod` | Deploy AKS infrastructure for **production** environment |
+        | `/check-aks-dev` | Check status of **development** AKS resources |
+        | `/check-aks-prod` | Check status of **production** AKS resources |
         | `/destroy-aks-dev` | Destroy AKS infrastructure for **development** environment |
         | `/destroy-aks-prod` | Destroy AKS infrastructure for **production** environment |
-        | `/plan-aks-dev` | Plan AKS infrastructure changes for **development** |
-        | `/plan-aks-prod` | Plan AKS infrastructure changes for **production** |
+        
+        ### 🔄 GitOps & Runners Commands
+        
+        | Command | Description |
+        |---------|-------------|
+        | `/bootstrap-flux-dev` | Bootstrap Flux GitOps on **dev** cluster |
+        | `/bootstrap-flux-prod` | Bootstrap Flux GitOps on **prod** cluster |
+        | `/deploy-arc-dev` | Deploy GitHub Action Runners on **dev** cluster |
+        | `/deploy-arc-prod` | Deploy GitHub Action Runners on **prod** cluster |
+        | `/status-runners-dev` | Check Flux & runner status on **dev** cluster |
+        | `/status-runners-prod` | Check Flux & runner status on **prod** cluster |
+        
+        ### 📋 Typical Workflow
+        
+        1. `/set-aks-backend` → Initialize Terraform state storage
+        2. `/build-aks-dev` → Deploy AKS cluster
+        3. `/bootstrap-flux-dev` → Setup GitOps with Flux
+        4. `/deploy-arc-dev` → Deploy self-hosted GitHub runners
+        5. `/status-runners-dev` → Verify everything is running
         
         ---
 
