@@ -208,16 +208,23 @@ jobs:
           )
           ENV_CODE="${ENV_SHORT[$ENV]:-$ENV}"
           
+          # Clean prefix and app name (remove dashes and special chars)
+          PREFIX_CLEAN=$(echo "$ORG_PREFIX" | tr -d '-_' | tr '[:upper:]' '[:lower:]')
+          APP_NAME_CLEAN=$(echo "$APP_NAME" | tr -d '-_' | tr '[:upper:]' '[:lower:]')
+          
           # Naming pattern: {prefix}-{app}-{location_short}-{env_short}-{type}
           BASE_NAME="${ORG_PREFIX}-${APP_NAME}-${LOCATION_CODE}-${ENV_CODE}"
+          BASE_NAME_NO_DASH="${PREFIX_CLEAN}${APP_NAME_CLEAN}${LOCATION_CODE}${ENV_CODE}"
           RG_NAME="${BASE_NAME}-rg"
           AKS_NAME="${BASE_NAME}-aks"
-          KV_NAME="${BASE_NAME}-kv"
           
-          # Truncate Key Vault name if > 24 chars
-          KV_NAME=$(echo "$KV_NAME" | cut -c1-24)
+          # Key Vault uses key_vault_short: {base_no_dash}kv{unique_suffix} truncated to 24 chars
+          # unique_suffix = first 4 chars of md5 hash
+          UNIQUE_SUFFIX=$(echo -n "${ORG_PREFIX}${APP_NAME}${ENV}${LOCATION}" | md5sum | cut -c1-4)
+          KV_NAME=$(echo "${BASE_NAME_NO_DASH}kv${UNIQUE_SUFFIX}" | cut -c1-24)
           
           echo "🔧 Using naming pattern: ${BASE_NAME}-*"
+          echo "🔐 Key Vault (short): ${KV_NAME}"
           echo "rg_name=${RG_NAME}" >> $GITHUB_OUTPUT
           echo "aks_name=${AKS_NAME}" >> $GITHUB_OUTPUT
           echo "kv_name=${KV_NAME}" >> $GITHUB_OUTPUT
