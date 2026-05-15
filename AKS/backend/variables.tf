@@ -3,11 +3,11 @@
 # =============================================================================
 
 variable "organization_prefix" {
-  description = "Organization prefix for resource naming (3-8 characters)"
+  description = "Organization prefix for resource naming (3-15 characters)"
   type        = string
   validation {
-    condition     = can(regex("^[a-zA-Z][a-zA-Z0-9]{2,7}$", var.organization_prefix))
-    error_message = "Organization prefix must be 3-8 alphanumeric characters, starting with a letter."
+    condition     = can(regex("^[a-zA-Z][a-zA-Z0-9]{2,14}$", var.organization_prefix))
+    error_message = "Organization prefix must be 3-15 alphanumeric characters, starting with a letter."
   }
 }
 
