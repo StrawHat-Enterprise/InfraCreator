@@ -1,0 +1,56 @@
+name: Test Self-Hosted Runner
+
+on:
+  workflow_dispatch:
+    inputs:
+      message:
+        description: 'Test message to display'
+        required: false
+        default: 'Hello from self-hosted runner!'
+
+jobs:
+  test-runner:
+    name: Test Self-Hosted Runner
+    runs-on: straw-hat-runners-linux
+    
+    steps:
+      - name: Display runner info
+        run: |
+          echo "🚀 Running on self-hosted runner!"
+          echo "=================================="
+          echo "Message: ${{ github.event.inputs.message }}"
+          echo "Runner Name: $RUNNER_NAME"
+          echo "Runner OS: $RUNNER_OS"
+          echo "Runner Arch: $RUNNER_ARCH"
+          echo "Hostname: $(hostname)"
+          echo "Working Directory: $(pwd)"
+          echo "=================================="
+          
+      - name: Check Docker (DinD)
+        run: |
+          echo "🐳 Docker Info:"
+          docker --version
+          docker info --format '{{.OperatingSystem}}'
+          
+      - name: Run a test container
+        run: |
+          echo "📦 Running Alpine container..."
+          docker run --rm alpine:latest echo "Container works!"
+          
+      - name: System information
+        run: |
+          echo "💻 System Info:"
+          echo "CPU: $(nproc) cores"
+          echo "Memory: $(free -h | grep Mem | awk '{print $2}')"
+          echo "Disk: $(df -h / | tail -1 | awk '{print $4}' ) available"
+          
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: List repository files
+        run: |
+          echo "📁 Repository structure:"
+          ls -la
+          echo ""
+          echo "📄 README preview:"
+          head -20 README.md || echo "No README.md found"
