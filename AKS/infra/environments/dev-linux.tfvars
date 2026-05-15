@@ -44,7 +44,7 @@ create_nat_gateway       = true
 # AKS Configuration
 # =============================================================================
 
-kubernetes_version        = "1.29"
+kubernetes_version        = "1.30"
 automatic_channel_upgrade = "patch"
 sku_tier                  = "Free"  # Use Standard for SLA in production
 
