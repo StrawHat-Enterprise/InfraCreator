@@ -3,7 +3,18 @@
 # =============================================================================
 # This workflow runs on the self-hosted ARC runners deployed in AKS
 # 
-# Runner Label: straw-hat-runners-linux
+# Available Runner Labels:
+#   - straw-hat-runners-linux  (primary label - the scale set name)
+#   - self-hosted
+#   - linux
+#   - x64
+#   - scale-set
+#
+# Usage Examples:
+#   runs-on: straw-hat-runners-linux                    # by scale set name
+#   runs-on: [self-hosted, linux, x64]                  # by standard labels
+#   runs-on: [self-hosted, scale-set]                   # by custom label
+#
 # The runner is registered at organization level (BkCloudOps)
 # =============================================================================
 
