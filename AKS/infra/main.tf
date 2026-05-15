@@ -147,6 +147,14 @@ module "kubelet_identity" {
   common_tags         = module.naming.common_tags
 }
 
+# Grant AKS identity "Managed Identity Operator" role on kubelet identity
+# Required for AKS to assign kubelet identity to node pools
+resource "azurerm_role_assignment" "aks_kubelet_mio" {
+  scope                = module.kubelet_identity.id
+  role_definition_name = "Managed Identity Operator"
+  principal_id         = module.aks_identity.principal_id
+}
+
 # =============================================================================
 # Azure Container Registry
 # =============================================================================
@@ -307,4 +315,8 @@ module "aks" {
   }
 
   additional_tags = var.additional_tags
+
+  depends_on = [
+    azurerm_role_assignment.aks_kubelet_mio  # Ensure AKS identity has MIO role on kubelet identity
+  ]
 }
