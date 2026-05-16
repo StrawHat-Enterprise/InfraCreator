@@ -1,0 +1,231 @@
+# =============================================================================
+# IssueOps: Deploy Runners (v2) — flavor + types in one command
+# =============================================================================
+# Triggered by commenting on an AKS deployment issue. Command shape:
+#
+#   /deploy-runners env=<dev|prod> flavor=<gh-supported|community> types=<a,b,c>
+#
+#   env     : dev | prod
+#   flavor  : gh-supported  -> actions/gha-runner-scale-set (official)
+#             community     -> actions-runner-controller (summerwind, legacy)
+#   types   : comma list, any of: dind | kubernetes | gpu
+#
+# What this workflow does:
+#   - Validates the command syntax
+#   - Edits actions-runner-gitops to enable the requested overlays with:
+#       runnerGroup = straw-hat-runners-linux-<env>-<type>
+#       image       = ghcr.io/strawhat-enterprise/actions-runner:linux-<type>-latest
+#   - Commits + pushes to the gitops repo (Flux reconciles)
+#
+# PREREQUISITES (must be run as separate issue comments BEFORE this command):
+#   1. /set-aks-backend                — Terraform state backend
+#   2. /build-aks-<env>                — AKS cluster
+#   3. /bootstrap-flux-<env>           — Flux + cert-manager + ESO + WI fed cred
+#
+# Once those are green this workflow can be invoked any number of times to
+# add / remove runner types.
+# =============================================================================
+
+name: "IssueOps: Deploy Runners (v2)"
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  issues: write
+  contents: write
+  pull-requests: write
+
+env:
+  GITOPS_REPO: "actions-runner-gitops"
+  GITOPS_OWNER: "StrawHat-Enterprise"
+  RUNNER_GROUP_PREFIX: "straw-hat-runners-linux"
+  RUNNER_IMAGE_REPO: "ghcr.io/strawhat-enterprise/actions-runner"
+
+jobs:
+  deploy-runners:
+    name: Process /deploy-runners
+    runs-on: ubuntu-latest
+    if: |
+      github.event.issue.pull_request == null &&
+      startsWith(github.event.comment.body, '/deploy-runners')
+    steps:
+      - name: Parse comment
+        id: p
+        run: |
+          COMMENT="${{ github.event.comment.body }}"
+          ENV=$(echo "$COMMENT"    | grep -oE 'env=[a-z]+'        | head -1 | cut -d= -f2 || true)
+          FLAVOR=$(echo "$COMMENT" | grep -oE 'flavor=[a-z-]+'    | head -1 | cut -d= -f2 || true)
+          TYPES=$(echo "$COMMENT"  | grep -oE 'types=[a-z,]+'     | head -1 | cut -d= -f2 || true)
+
+          VALID=true
+          [[ "$ENV" =~ ^(dev|prod)$ ]] || VALID=false
+          [[ "$FLAVOR" =~ ^(gh-supported|community)$ ]] || VALID=false
+          [[ -n "$TYPES" ]] || VALID=false
+
+          echo "env=$ENV"       >> "$GITHUB_OUTPUT"
+          echo "flavor=$FLAVOR" >> "$GITHUB_OUTPUT"
+          echo "types=$TYPES"   >> "$GITHUB_OUTPUT"
+          echo "valid=$VALID"   >> "$GITHUB_OUTPUT"
+
+      - name: Reject invalid syntax
+        if: steps.p.outputs.valid != 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: [
+                '❌ Invalid `/deploy-runners` syntax.',
+                '',
+                'Expected:',
+                '```',
+                '/deploy-runners env=<dev|prod> flavor=<gh-supported|community> types=<dind|kubernetes|gpu>[,..]',
+                '```',
+                '',
+                'Example:',
+                '```',
+                '/deploy-runners env=dev flavor=gh-supported types=dind,kubernetes',
+                '```'
+              ].join('\n')
+            });
+            core.setFailed('Invalid syntax');
+
+      - name: Acknowledge comment
+        if: steps.p.outputs.valid == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: context.payload.comment.id,
+              content: 'rocket'
+            });
+
+      - name: Checkout gitops repo
+        if: steps.p.outputs.valid == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.GITOPS_OWNER }}/${{ env.GITOPS_REPO }}
+          token: ${{ secrets.GH_PAT }}
+          path: gitops
+
+      - name: Render overlays + flavor switch
+        if: steps.p.outputs.valid == 'true'
+        env:
+          ENV: ${{ steps.p.outputs.env }}
+          FLAVOR: ${{ steps.p.outputs.flavor }}
+          TYPES: ${{ steps.p.outputs.types }}
+        run: |
+          set -euo pipefail
+          cd gitops
+
+          OVERLAY_DIR="apps/runners/overlays/${ENV}"
+          mkdir -p "${OVERLAY_DIR}"
+
+          IFS=',' read -ra TYPE_ARR <<< "${TYPES}"
+
+          # Re-generate the aggregator kustomization to list only the
+          # requested types — Flux will prune the rest.
+          {
+            echo "# Generated by issueops-deploy-runners-v2.yml"
+            echo "# env=${ENV} flavor=${FLAVOR} types=${TYPES}"
+            echo "apiVersion: kustomize.config.k8s.io/v1beta1"
+            echo "kind: Kustomization"
+            echo "resources:"
+            echo "  - ../../shared"
+            for t in "${TYPE_ARR[@]}"; do
+              echo "  - ${t}"
+            done
+          } > "${OVERLAY_DIR}/kustomization.yaml"
+
+          BASE_REF="../../../base/gh-supported"
+          [[ "${FLAVOR}" == "community" ]] && BASE_REF="../../../base/community"
+
+          for t in "${TYPE_ARR[@]}"; do
+            mkdir -p "${OVERLAY_DIR}/${t}"
+            NAME="${RUNNER_GROUP_PREFIX}-${ENV}-${t}"
+            IMAGE="${RUNNER_IMAGE_REPO}:linux-${t}-latest"
+            CMODE="dind"
+            [[ "${t}" == "kubernetes" ]] && CMODE="kubernetes"
+
+            cat > "${OVERLAY_DIR}/${t}/kustomization.yaml" <<EOF
+          # Auto-generated by /deploy-runners (issue #${{ github.event.issue.number }}).
+          apiVersion: kustomize.config.k8s.io/v1beta1
+          kind: Kustomization
+          namespace: flux-system
+          resources:
+            - ${BASE_REF}
+          nameSuffix: -${ENV}-${t}
+          patches:
+            - patch: |
+                - op: replace
+                  path: /spec/values/runnerScaleSetName
+                  value: "${NAME}"
+                - op: replace
+                  path: /spec/values/runnerGroup
+                  value: "${NAME}"
+                - op: replace
+                  path: /spec/values/containerMode/type
+                  value: "${CMODE}"
+                - op: replace
+                  path: /spec/values/template/spec/containers/0/image
+                  value: "${IMAGE}"
+              target:
+                kind: HelmRelease
+                name: runner-scale-set
+          EOF
+          done
+
+      - name: Commit & push to gitops
+        if: steps.p.outputs.valid == 'true'
+        env:
+          ENV: ${{ steps.p.outputs.env }}
+          FLAVOR: ${{ steps.p.outputs.flavor }}
+          TYPES: ${{ steps.p.outputs.types }}
+        run: |
+          cd gitops
+          if git diff --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          git config user.name  "issueops-bot"
+          git config user.email "issueops-bot@users.noreply.github.com"
+          git add apps/runners
+          git commit -m "deploy: ${FLAVOR}/${TYPES} on ${ENV} (issue #${{ github.event.issue.number }})"
+          git push origin HEAD:main
+
+      - name: Final status comment
+        if: always() && steps.p.outputs.valid == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const env    = '${{ steps.p.outputs.env }}';
+            const flavor = '${{ steps.p.outputs.flavor }}';
+            const types  = '${{ steps.p.outputs.types }}';
+            const ok     = '${{ job.status }}' === 'success';
+            const prefix = ok ? '✅' : '❌';
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              issue_number: context.issue.number,
+              body: [
+                `${prefix} **/deploy-runners** processed`,
+                '',
+                `| Field   | Value |`,
+                `|---------|-------|`,
+                `| env     | \`${env}\` |`,
+                `| flavor  | \`${flavor}\` |`,
+                `| types   | \`${types}\` |`,
+                `| run     | [view](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}) |`,
+                '',
+                ok
+                  ? `Flux will reconcile runner scale sets in the **${env}** cluster. Each runner is named \`${{ env.RUNNER_GROUP_PREFIX }}-${env}-<type>\` and pulls \`${{ env.RUNNER_IMAGE_REPO }}:linux-<type>-latest\` from GHCR.\n\n> Make sure \`/set-aks-backend\`, \`/build-aks-${env}\` and \`/bootstrap-flux-${env}\` were run first.`
+                  : `Step failed. See the workflow run for details.`
+              ].join('\n')
+            });
+
