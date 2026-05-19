@@ -566,6 +566,8 @@ jobs:
       - name: Post success comment
         if: success()
         uses: actions/github-script@v7
+        env:
+          STATUS_CONTENT: ${{ steps.status.outputs.status_content }}
         with:
           script: |
             const action = '${{ needs.parse-command.outputs.action }}';
@@ -627,7 +629,7 @@ jobs:
               case 'status':
                 emoji = '📊';
                 title = 'Runner Status Report';
-                content = `${{ steps.status.outputs.status_content }}`;
+                content = process.env.STATUS_CONTENT || 'No status details captured.';
                 break;
               
               default:
