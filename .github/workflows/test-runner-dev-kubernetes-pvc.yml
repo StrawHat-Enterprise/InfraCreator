@@ -8,10 +8,6 @@ jobs:
     name: Test Dev Kubernetes PVC Group
     runs-on:
       group: straw-hat-runners-linux-dev-kubernetes-pvc
-      labels:
-        - self-hosted
-        - linux
-        - x64
     timeout-minutes: 15
 
     steps:

@@ -8,10 +8,6 @@ jobs:
     name: Test Dev DinD Group
     runs-on:
       group: straw-hat-runners-linux-dev-dind
-      labels:
-        - self-hosted
-        - linux
-        - x64
     timeout-minutes: 15
 
     steps:

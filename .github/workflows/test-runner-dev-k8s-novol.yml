@@ -8,10 +8,6 @@ jobs:
     name: Test Dev K8s NoVol Group
     runs-on:
       group: straw-runners-linux-dev-k8s-novol
-      labels:
-        - self-hosted
-        - linux
-        - x64
     timeout-minutes: 15
 
     steps:
