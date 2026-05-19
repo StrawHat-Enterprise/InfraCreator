@@ -6,8 +6,7 @@ on:
 jobs:
   test-dev-dind:
     name: Test Dev DinD Group
-    runs-on:
-      group: straw-hat-runners-linux-dev-dind
+    runs-on: straw-hat-runners-linux-dev-dind
     timeout-minutes: 15
 
     steps:

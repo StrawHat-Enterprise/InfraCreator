@@ -6,8 +6,7 @@ on:
 jobs:
   test-dev-kubernetes-pvc:
     name: Test Dev Kubernetes PVC Group
-    runs-on:
-      group: straw-hat-runners-linux-dev-kubernetes-pvc
+    runs-on: straw-hat-runners-linux-dev-kubernetes-pvc
     timeout-minutes: 15
 
     container:
