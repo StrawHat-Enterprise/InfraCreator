@@ -1,0 +1,190 @@
+# =============================================================================
+# Unlock Terraform State
+# =============================================================================
+# This workflow unlocks a Terraform state file when it gets stuck in a locked
+# state due to a failed or interrupted Terraform run.
+#
+# Usage:
+#   1. Go to Actions > "Unlock Terraform State"
+#   2. Click "Run workflow"
+#   3. Provide the environment (dev/prod) and optionally the lock ID
+#   4. Run the workflow
+#
+# The workflow will:
+#   - Break the blob lease on the state file
+#   - Optionally run `terraform force-unlock` if lock ID is provided
+# =============================================================================
+
+name: Unlock Terraform State
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment (dev or prod)'
+        required: true
+        type: choice
+        options:
+          - dev
+          - prod
+        default: 'dev'
+      lock_id:
+        description: 'Terraform Lock ID (optional - from error message)'
+        required: false
+        type: string
+      state_key:
+        description: 'State file key (default: aks-<env>.tfstate)'
+        required: false
+        type: string
+      force_break_lease:
+        description: 'Force break blob lease even without lock ID'
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  BACKEND_RESOURCE_GROUP: "straw-tfstate-eus-dev-rg"
+  BACKEND_STORAGE_ACCOUNT: "strawtfstateeusdevst1e78"
+  BACKEND_CONTAINER: "tfstate"
+
+jobs:
+  unlock-state:
+    name: Unlock State (${{ inputs.environment }})
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Determine State File Key
+        id: state-key
+        run: |
+          if [ -n "${{ inputs.state_key }}" ]; then
+            STATE_KEY="${{ inputs.state_key }}"
+          else
+            STATE_KEY="aks-${{ inputs.environment }}.tfstate"
+          fi
+          echo "state_key=${STATE_KEY}" >> $GITHUB_OUTPUT
+          echo "📁 State file: ${STATE_KEY}"
+
+      - name: Get Current Lease Status
+        id: lease-status
+        run: |
+          echo "🔍 Checking lease status for ${{ steps.state-key.outputs.state_key }}..."
+          
+          BLOB_PROPS=$(az storage blob show \
+            --account-name ${{ env.BACKEND_STORAGE_ACCOUNT }} \
+            --container-name ${{ env.BACKEND_CONTAINER }} \
+            --name ${{ steps.state-key.outputs.state_key }} \
+            --auth-mode login \
+            --query "{leaseState: properties.lease.state, leaseStatus: properties.lease.status, leaseDuration: properties.lease.duration}" \
+            -o json 2>/dev/null || echo '{"leaseState": "unknown", "leaseStatus": "unknown"}')
+          
+          echo "Blob properties: ${BLOB_PROPS}"
+          
+          LEASE_STATE=$(echo "$BLOB_PROPS" | jq -r '.leaseState // "unknown"')
+          LEASE_STATUS=$(echo "$BLOB_PROPS" | jq -r '.leaseStatus // "unknown"')
+          
+          echo "lease_state=${LEASE_STATE}" >> $GITHUB_OUTPUT
+          echo "lease_status=${LEASE_STATUS}" >> $GITHUB_OUTPUT
+          
+          if [ "$LEASE_STATE" == "leased" ]; then
+            echo "⚠️ State file is LOCKED (lease state: $LEASE_STATE)"
+            echo "is_locked=true" >> $GITHUB_OUTPUT
+          else
+            echo "✅ State file is NOT locked (lease state: $LEASE_STATE)"
+            echo "is_locked=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Break Blob Lease
+        if: inputs.force_break_lease || steps.lease-status.outputs.is_locked == 'true'
+        run: |
+          echo "🔓 Breaking blob lease on ${{ steps.state-key.outputs.state_key }}..."
+          
+          az storage blob lease break \
+            --account-name ${{ env.BACKEND_STORAGE_ACCOUNT }} \
+            --container-name ${{ env.BACKEND_CONTAINER }} \
+            --blob-name ${{ steps.state-key.outputs.state_key }} \
+            --auth-mode login \
+            --lease-break-period 0 \
+            2>/dev/null || echo "Note: Lease break returned non-zero (may already be unlocked)"
+          
+          echo "✅ Blob lease break command executed"
+
+      - name: Setup Terraform
+        if: inputs.lock_id != ''
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.5.0
+          terraform_wrapper: false
+
+      - name: Terraform Force Unlock
+        if: inputs.lock_id != ''
+        working-directory: AKS/infra
+        run: |
+          echo "🔓 Running terraform force-unlock with Lock ID: ${{ inputs.lock_id }}"
+          
+          # Initialize Terraform with backend
+          terraform init \
+            -backend-config="resource_group_name=${{ env.BACKEND_RESOURCE_GROUP }}" \
+            -backend-config="storage_account_name=${{ env.BACKEND_STORAGE_ACCOUNT }}" \
+            -backend-config="container_name=${{ env.BACKEND_CONTAINER }}" \
+            -backend-config="key=${{ steps.state-key.outputs.state_key }}"
+          
+          # Force unlock
+          terraform force-unlock -force "${{ inputs.lock_id }}"
+          
+          echo "✅ Terraform force-unlock completed"
+
+      - name: Verify Unlock
+        run: |
+          echo "🔍 Verifying state file is unlocked..."
+          
+          BLOB_PROPS=$(az storage blob show \
+            --account-name ${{ env.BACKEND_STORAGE_ACCOUNT }} \
+            --container-name ${{ env.BACKEND_CONTAINER }} \
+            --name ${{ steps.state-key.outputs.state_key }} \
+            --auth-mode login \
+            --query "{leaseState: properties.lease.state, leaseStatus: properties.lease.status}" \
+            -o json 2>/dev/null || echo '{"leaseState": "unknown"}')
+          
+          LEASE_STATE=$(echo "$BLOB_PROPS" | jq -r '.leaseState // "unknown"')
+          
+          if [ "$LEASE_STATE" == "available" ] || [ "$LEASE_STATE" == "broken" ]; then
+            echo "✅ State file is now UNLOCKED (lease state: $LEASE_STATE)"
+          else
+            echo "⚠️ State file lease state: $LEASE_STATE"
+          fi
+
+      - name: Summary
+        run: |
+          echo "## 🔓 Terraform State Unlock Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | \`${{ inputs.environment }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| State File | \`${{ steps.state-key.outputs.state_key }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Storage Account | \`${{ env.BACKEND_STORAGE_ACCOUNT }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Container | \`${{ env.BACKEND_CONTAINER }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Lock ID Provided | \`${{ inputs.lock_id || 'None' }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Initial Lease State | \`${{ steps.lease-status.outputs.lease_state }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Actions Taken" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Blob lease break executed" >> $GITHUB_STEP_SUMMARY
+          if [ -n "${{ inputs.lock_id }}" ]; then
+            echo "- ✅ Terraform force-unlock executed" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "You can now retry your Terraform operation." >> $GITHUB_STEP_SUMMARY
