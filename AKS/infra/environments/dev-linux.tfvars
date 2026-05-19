@@ -28,7 +28,10 @@ additional_tags = {
 # =============================================================================
 
 # Add your Azure AD group object IDs for cluster admin access
-admin_group_object_ids = []
+admin_group_object_ids = ["be2a05c2-eba7-42cc-8f1d-375c25527779"]
+
+# K8s admin user/group Object ID
+k8s_admin_object_id = "be2a05c2-eba7-42cc-8f1d-375c25527779"
 
 # =============================================================================
 # Network Configuration
