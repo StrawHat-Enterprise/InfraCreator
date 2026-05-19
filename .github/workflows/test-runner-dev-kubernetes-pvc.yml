@@ -8,11 +8,11 @@ jobs:
     name: Test Dev Kubernetes PVC Group
     runs-on:
       group: straw-hat-runners-linux-dev-kubernetes-pvc
-      labels: linux
+      labels:
+        - self-hosted
+        - linux
+        - x64
     timeout-minutes: 15
-
-    container:
-      image: alpine:3.20
 
     steps:
       - name: Show runner info
@@ -24,6 +24,11 @@ jobs:
 
       - name: Test workspace write
         run: |
-          mkdir -p /__w/_temp/pvc-check
-          echo "ok" > /__w/_temp/pvc-check/status.txt
-          cat /__w/_temp/pvc-check/status.txt
+          mkdir -p "$GITHUB_WORKSPACE/pvc-check"
+          echo "ok" > "$GITHUB_WORKSPACE/pvc-check/status.txt"
+          cat "$GITHUB_WORKSPACE/pvc-check/status.txt"
+
+      - name: Keep pod alive for PVC observation
+        run: |
+          echo "Sleeping for 180s so you can verify child pod + PVC in Kubernetes"
+          sleep 180
