@@ -7,8 +7,7 @@ jobs:
   test-dev-dind:
     name: Test Dev DinD Group
     runs-on:
-      - self-hosted
-      - straw-hat-runners-linux-dev-dind
+      group: straw-hat-runners-linux-dev-dind
     timeout-minutes: 15
 
     steps:

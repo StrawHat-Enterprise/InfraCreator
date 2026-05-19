@@ -6,7 +6,8 @@ on:
 jobs:
   test-dev-k8s-novol:
     name: Test Dev K8s NoVol Group (Current DinD-NoPVC)
-    runs-on: straw-runners-linux-dev-k8s-novol
+    runs-on:
+      group: straw-runners-linux-dev-k8s-novol
     timeout-minutes: 15
 
     steps:
