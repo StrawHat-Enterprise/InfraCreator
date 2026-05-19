@@ -144,8 +144,8 @@ create_federated_credential \
 # Create credential for issue comments (IssueOps without environment)
 create_federated_credential \
     "github-${GITHUB_REPO,,}-issueops" \
-    "repo:${GITHUB_ORG}/${GITHUB_REPO}:ref:refs/heads/main" \
-    "GitHub Actions - IssueOps (issue_comment on main)"
+    "repo:${GITHUB_ORG}/${GITHUB_REPO}:pull_request" \
+    "GitHub Actions - Pull Requests"
 
 # =============================================================================
 # Step 4: Assign Azure Roles
