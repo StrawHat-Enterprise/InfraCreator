@@ -8,6 +8,8 @@
 # Supported commands:
 #   /build-aks-dev    - Deploy development environment (creates if not exists)
 #   /build-aks-prod   - Deploy production environment (creates if not exists)
+#   /build-aks-community      - Alias of /build-aks-dev
+#   /build-aks-gh-supported   - Alias of /build-aks-prod
 #   /plan-aks-dev     - Plan development environment
 #   /plan-aks-prod    - Plan production environment
 #   /check-aks-dev    - Check if dev AKS cluster exists
@@ -115,6 +117,18 @@ jobs:
             echo "action=apply" >> $GITHUB_OUTPUT
             echo "tfvars_file=prod-linux-windows.tfvars" >> $GITHUB_OUTPUT
             echo "check_only=false" >> $GITHUB_OUTPUT
+          elif [[ "$COMMENT" =~ ^/build-aks-community ]]; then
+            echo "should_run=true" >> $GITHUB_OUTPUT
+            echo "environment=dev" >> $GITHUB_OUTPUT
+            echo "action=apply" >> $GITHUB_OUTPUT
+            echo "tfvars_file=dev-linux.tfvars" >> $GITHUB_OUTPUT
+            echo "check_only=false" >> $GITHUB_OUTPUT
+          elif [[ "$COMMENT" =~ ^/build-aks-gh-supported ]]; then
+            echo "should_run=true" >> $GITHUB_OUTPUT
+            echo "environment=prod" >> $GITHUB_OUTPUT
+            echo "action=apply" >> $GITHUB_OUTPUT
+            echo "tfvars_file=prod-linux-windows.tfvars" >> $GITHUB_OUTPUT
+            echo "check_only=false" >> $GITHUB_OUTPUT
           # Check for plan commands
           elif [[ "$COMMENT" =~ ^/plan-aks-dev ]]; then
             echo "should_run=true" >> $GITHUB_OUTPUT
@@ -123,6 +137,18 @@ jobs:
             echo "tfvars_file=dev-linux.tfvars" >> $GITHUB_OUTPUT
             echo "check_only=false" >> $GITHUB_OUTPUT
           elif [[ "$COMMENT" =~ ^/plan-aks-prod ]]; then
+            echo "should_run=true" >> $GITHUB_OUTPUT
+            echo "environment=prod" >> $GITHUB_OUTPUT
+            echo "action=plan" >> $GITHUB_OUTPUT
+            echo "tfvars_file=prod-linux-windows.tfvars" >> $GITHUB_OUTPUT
+            echo "check_only=false" >> $GITHUB_OUTPUT
+          elif [[ "$COMMENT" =~ ^/plan-aks-community ]]; then
+            echo "should_run=true" >> $GITHUB_OUTPUT
+            echo "environment=dev" >> $GITHUB_OUTPUT
+            echo "action=plan" >> $GITHUB_OUTPUT
+            echo "tfvars_file=dev-linux.tfvars" >> $GITHUB_OUTPUT
+            echo "check_only=false" >> $GITHUB_OUTPUT
+          elif [[ "$COMMENT" =~ ^/plan-aks-gh-supported ]]; then
             echo "should_run=true" >> $GITHUB_OUTPUT
             echo "environment=prod" >> $GITHUB_OUTPUT
             echo "action=plan" >> $GITHUB_OUTPUT
@@ -490,11 +516,11 @@ jobs:
           
           # Use sed to remove overridden blocks and append the rest
           # First, extract single-line settings that don't conflict
-          grep -E "^(vnet_address_space|subnet_|create_nat_gateway|kubernetes_version|automatic_channel_upgrade|sku_tier|network_profile_preset|service_cidr|dns_service_ip|outbound_type|enable_windows_node_pool|windows_admin_username|log_analytics_|oms_agent|key_vault_|azure_policy_|oidc_issuer|workload_identity|acr_sku|storage_replication)" "$TFVARS_FILE" >> terraform.tfvars 2>/dev/null || true
+          grep -E "^(vnet_address_space|subnet_|create_nat_gateway|kubernetes_version|automatic_channel_upgrade|sku_tier|network_profile_preset|service_cidr|dns_service_ip|outbound_type|enable_windows_node_pools|windows_admin_username|log_analytics_|oms_agent|key_vault_|azure_policy_|oidc_issuer|workload_identity|acr_sku|storage_replication)" "$TFVARS_FILE" >> terraform.tfvars 2>/dev/null || true
           
           # Now extract multi-line blocks (system_node_pool, additional_node_pools) using awk
           awk '/^system_node_pool\s*=\s*\{/,/^\}/' "$TFVARS_FILE" >> terraform.tfvars 2>/dev/null || true
-          awk '/^additional_node_pools\s*=\s*\[/,/^\]/' "$TFVARS_FILE" >> terraform.tfvars 2>/dev/null || true
+          awk '/^additional_node_pools\s*=\s*\{/,/^\}/' "$TFVARS_FILE" >> terraform.tfvars 2>/dev/null || true
 
       - name: Terraform Init
         id: init

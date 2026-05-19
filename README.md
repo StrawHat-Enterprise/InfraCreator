@@ -88,10 +88,25 @@ or
 | `/set-aks-backend` | Initialize Terraform backend (storage account) |
 | `/build-aks-dev` | Deploy development AKS cluster |
 | `/build-aks-prod` | Deploy production AKS cluster |
+| `/build-aks-community` | Alias for `/build-aks-dev` |
+| `/build-aks-gh-supported` | Alias for `/build-aks-prod` |
 | `/plan-aks-dev` | Show plan for development changes |
 | `/plan-aks-prod` | Show plan for production changes |
+| `/plan-aks-community` | Alias for `/plan-aks-dev` |
+| `/plan-aks-gh-supported` | Alias for `/plan-aks-prod` |
 | `/destroy-aks-dev` | Destroy development infrastructure |
 | `/destroy-aks-prod` | Destroy production infrastructure |
+
+### Two-cluster ARC topology
+
+- Cluster A (`dev`) uses community ARC flavor:
+  - `/build-aks-community`
+  - `/bootstrap-flux-dev`
+  - `/deploy-runners env=dev flavor=community types=dind`
+- Cluster B (`prod`) uses GitHub-supported ARC flavor with all required types:
+  - `/build-aks-gh-supported`
+  - `/bootstrap-flux-prod`
+  - `/deploy-runners env=prod flavor=gh-supported types=dind,kubernetes-pvc,kubernetes-novolume`
 
 ### Required GitHub Secrets
 

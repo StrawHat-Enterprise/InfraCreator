@@ -1,24 +1,14 @@
 # =============================================================================
-# Sample Workflow - Self-Hosted Runner Test
+# Sample Workflow - ARC Runner Modes Validation
 # =============================================================================
-# This workflow runs on the self-hosted ARC runners deployed in AKS
-# 
-# Available Runner Labels:
-#   - straw-hat-runners-linux  (primary label - the scale set name)
-#   - self-hosted
-#   - linux
-#   - x64
-#   - scale-set
-#
-# Usage Examples:
-#   runs-on: straw-hat-runners-linux                    # by scale set name
-#   runs-on: [self-hosted, linux, x64]                  # by standard labels
-#   runs-on: [self-hosted, scale-set]                   # by custom label
-#
-# The runner is registered at organization level (BkCloudOps)
+# Runs on all configured runner pools:
+#   - community / dev / dind
+#   - gh-supported / prod / dind
+#   - gh-supported / prod / kubernetes-pvc
+#   - gh-supported / prod / kubernetes-novolume
 # =============================================================================
 
-name: "Sample: Self-Hosted Runner Test"
+name: "Sample: ARC Runner Modes"
 
 on:
   workflow_dispatch:
@@ -29,30 +19,19 @@ on:
         default: 'Hello from self-hosted runner!'
 
 jobs:
-  test-runner:
-    name: Test Self-Hosted Runner
-    # Use the self-hosted runner label
-    runs-on: straw-hat-runners-linux
-    
+  community-dev-dind:
+    name: Community Dev DinD
+    runs-on: straw-hat-runners-linux-dev-dind
+
     steps:
       - name: Display runner info
         run: |
-          echo "🚀 Running on self-hosted runner!"
+          echo "🚀 Running community dev dind runner"
           echo "Message: ${{ github.event.inputs.message }}"
-          echo ""
-          echo "=== Runner Information ==="
           echo "Runner Name: $RUNNER_NAME"
           echo "Runner OS: $RUNNER_OS"
           echo "Runner Arch: $RUNNER_ARCH"
-          echo ""
-          echo "=== System Information ==="
           uname -a
-          echo ""
-          echo "=== Docker Version ==="
-          docker --version || echo "Docker not available"
-          echo ""
-          echo "=== Environment ==="
-          env | grep -E "GITHUB|RUNNER" | sort
 
       - name: Test Docker (DinD)
         run: |
@@ -60,13 +39,48 @@ jobs:
           docker run --rm hello-world
           echo "✅ Docker is working!"
 
+  ghs-prod-dind:
+    name: GH Supported Prod DinD
+    runs-on: straw-hat-runners-linux-prod-dind
+
+    steps:
+      - name: Validate dind pool
+        run: |
+          echo "Runner: $RUNNER_NAME"
+          docker --version
+          docker run --rm alpine:3.20 echo "prod dind ok"
+
+  ghs-prod-kubernetes-pvc:
+    name: GH Supported Prod Kubernetes PVC
+    runs-on: straw-hat-runners-linux-prod-kubernetes-pvc
+
+    container:
+      image: alpine:3.20
+
+    steps:
+      - name: Validate kubernetes PVC mode
+        run: |
+          echo "Runner: $RUNNER_NAME"
+          echo "container mode with PVC is working"
+          touch /__w/_temp/pvc-mode.txt || true
+
+  ghs-prod-kubernetes-novolume:
+    name: GH Supported Prod Kubernetes NoVolume
+    runs-on: straw-hat-runners-linux-prod-kubernetes-novolume
+
+    container:
+      image: alpine:3.20
+
+    steps:
+      - name: Validate kubernetes novolume mode
+        run: |
+          echo "Runner: $RUNNER_NAME"
+          echo "container mode without PVC is working"
+
       - name: Checkout code
         uses: actions/checkout@v4
 
       - name: List repository files
         run: |
-          echo "=== Repository Contents ==="
           ls -la
-          echo ""
-          echo "=== Workflows ==="
-          ls -la .github/workflows/ || echo "No workflows directory"
+          ls -la .github/workflows/ || true

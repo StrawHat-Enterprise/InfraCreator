@@ -19,6 +19,8 @@ body:
         | `/set-aks-backend` | Initialize the Terraform backend (storage account for state files) |
         | `/build-aks-dev` | Deploy AKS infrastructure for **development** environment |
         | `/build-aks-prod` | Deploy AKS infrastructure for **production** environment |
+        | `/build-aks-community` | Alias for `/build-aks-dev` |
+        | `/build-aks-gh-supported` | Alias for `/build-aks-prod` |
         | `/check-aks-dev` | Check status of **development** AKS resources |
         | `/check-aks-prod` | Check status of **production** AKS resources |
         | `/destroy-aks-dev` | Destroy AKS infrastructure for **development** environment |
@@ -30,18 +32,19 @@ body:
         |---------|-------------|
         | `/bootstrap-flux-dev` | Bootstrap Flux GitOps on **dev** cluster |
         | `/bootstrap-flux-prod` | Bootstrap Flux GitOps on **prod** cluster |
-        | `/deploy-arc-dev` | Deploy GitHub Action Runners on **dev** cluster |
-        | `/deploy-arc-prod` | Deploy GitHub Action Runners on **prod** cluster |
+        | `/deploy-runners env=dev flavor=community types=dind` | Deploy community ARC runners on **dev** |
+        | `/deploy-runners env=prod flavor=gh-supported types=dind,kubernetes-pvc,kubernetes-novolume` | Deploy GitHub-supported ARC runners on **prod** |
         | `/status-runners-dev` | Check Flux & runner status on **dev** cluster |
         | `/status-runners-prod` | Check Flux & runner status on **prod** cluster |
         
         ### 📋 Typical Workflow
         
         1. `/set-aks-backend` → Initialize Terraform state storage
-        2. `/build-aks-dev` → Deploy AKS cluster
-        3. `/bootstrap-flux-dev` → Setup GitOps with Flux
-        4. `/deploy-arc-dev` → Deploy self-hosted GitHub runners
-        5. `/status-runners-dev` → Verify everything is running
+        2. `/build-aks-community` and `/build-aks-gh-supported` → Deploy both AKS clusters
+        3. `/bootstrap-flux-dev` and `/bootstrap-flux-prod` → Setup GitOps on both clusters
+        4. `/deploy-runners env=dev flavor=community types=dind`
+        5. `/deploy-runners env=prod flavor=gh-supported types=dind,kubernetes-pvc,kubernetes-novolume`
+        6. `/status-runners-dev` and `/status-runners-prod` → Verify everything is running
         
         ---
 
@@ -146,7 +149,7 @@ body:
         1. **Submit this issue** to create the deployment request
         2. **Comment `/set-aks-backend`** to initialize the Terraform state backend
         3. **Wait for backend completion** (you'll see a success comment)
-        4. **Comment `/build-aks-dev`** or `/build-aks-prod`** to deploy the AKS cluster
+        4. **Comment `/build-aks-community`** and **`/build-aks-gh-supported`** to deploy both AKS clusters
         
         ### 📊 Tracking
         

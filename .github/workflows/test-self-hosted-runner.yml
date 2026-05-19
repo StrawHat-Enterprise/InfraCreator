@@ -11,7 +11,7 @@ on:
 jobs:
   test-runner:
     name: Test Self-Hosted Runner
-    runs-on: straw-hat-runners-linux
+    runs-on: straw-hat-runners-linux-dev-dind
     
     steps:
       - name: Display runner info
