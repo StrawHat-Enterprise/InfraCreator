@@ -87,7 +87,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: parse-command
     if: needs.parse-command.outputs.should_run == 'true'
-    environment: ${{ needs.parse-command.outputs.environment }}
     
     steps:
       - name: Add reaction to comment
