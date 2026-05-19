@@ -238,11 +238,13 @@ jobs:
           echo "oidc_issuer=${OIDC_ISSUER}" >> $GITHUB_OUTPUT
           
           # Get Managed Identity Client ID (created by Terraform)
-          MI_NAME="${BASE_NAME}-id"
+          # Terraform creates: id-{org}-{app}-{env}-{location}-aks
+          MI_NAME="id-${ORG_PREFIX}-${APP_NAME}-${ENV}-${LOCATION}-aks"
           MI_CLIENT_ID=$(az identity show \
             --resource-group "$RG_NAME" \
             --name "$MI_NAME" \
             --query "clientId" -o tsv 2>/dev/null || echo "")
+          echo "mi_name=${MI_NAME}" >> $GITHUB_OUTPUT
           echo "mi_client_id=${MI_CLIENT_ID}" >> $GITHUB_OUTPUT
           
           echo "✅ Connected to cluster: ${AKS_NAME}"
@@ -355,9 +357,9 @@ jobs:
           LOCATION="${{ steps.parse-issue.outputs.location }}"
           ENV="${{ needs.parse-command.outputs.environment }}"
           
-          MI_NAME="id-${ORG_PREFIX}-${APP_NAME}-${ENV}-${LOCATION}"
+          MI_NAME="${{ steps.aks-creds.outputs.mi_name }}"
           
-          if [[ -n "$MI_CLIENT_ID" && -n "$OIDC_ISSUER" ]]; then
+          if [[ -n "$MI_CLIENT_ID" && -n "$OIDC_ISSUER" && -n "$MI_NAME" ]]; then
             echo "🔗 Setting up Workload Identity Federation..."
             
             # Create federated credential for external-secrets SA
