@@ -38,9 +38,9 @@ admin_group_object_ids = []
 # =============================================================================
 
 vnet_address_space       = ["10.0.0.0/16"]
-subnet_aks_system        = "10.0.0.0/22"   # 1022 IPs for system nodes
-subnet_aks_user          = "10.0.4.0/22"   # 1022 IPs for user nodes
-subnet_private_endpoints = "10.0.8.0/24"   # 254 IPs for private endpoints
+subnet_aks_system        = "10.0.0.0/22" # 1022 IPs for system nodes
+subnet_aks_user          = "10.0.4.0/22" # 1022 IPs for user nodes
+subnet_private_endpoints = "10.0.8.0/24" # 254 IPs for private endpoints
 create_nat_gateway       = true
 
 # =============================================================================
@@ -49,7 +49,7 @@ create_nat_gateway       = true
 
 kubernetes_version        = "1.29"
 automatic_channel_upgrade = "patch"
-sku_tier                  = "Standard"  # Required for production SLA
+sku_tier                  = "Standard" # Required for production SLA
 
 network_profile_preset = "azure_cni_overlay"
 service_cidr           = "10.96.0.0/16"
@@ -63,13 +63,13 @@ outbound_type          = "userAssignedNATGateway"
 system_node_pool = {
   name                         = "system"
   vm_size                      = "Standard_D4s_v3"
-  min_count                    = 3           # HA for production
+  min_count                    = 3 # HA for production
   max_count                    = 5
   max_pods                     = 30
   os_disk_size_gb              = 128
   os_disk_type                 = "Managed"
   os_sku                       = "Ubuntu"
-  zones                        = ["1", "2", "3"]  # Zone redundancy
+  zones                        = ["1", "2", "3"] # Zone redundancy
   only_critical_addons_enabled = true
   node_labels = {
     "nodepool-type" = "system"
@@ -83,15 +83,15 @@ system_node_pool = {
 
 additional_node_pools = {
   # Linux user pool for general workloads
-  linux-apps = {
-    vm_size     = "Standard_D4s_v3"
-    os_type     = "Linux"
-    os_sku      = "Ubuntu"
-    min_count   = 3
-    max_count   = 20
-    max_pods    = 30
-    zones       = ["1", "2", "3"]
-    mode        = "User"
+  linuxapps = {
+    vm_size   = "Standard_D4s_v3"
+    os_type   = "Linux"
+    os_sku    = "Ubuntu"
+    min_count = 3
+    max_count = 20
+    max_pods  = 30
+    zones     = ["1", "2", "3"]
+    mode      = "User"
     node_labels = {
       "nodepool-type" = "user"
       "os"            = "linux"
@@ -103,14 +103,14 @@ additional_node_pools = {
 
   # Linux pool for memory-intensive workloads
   linux-memory = {
-    vm_size     = "Standard_E4s_v3"  # Memory optimized
-    os_type     = "Linux"
-    os_sku      = "Ubuntu"
-    min_count   = 0
-    max_count   = 10
-    max_pods    = 30
-    zones       = ["1", "2", "3"]
-    mode        = "User"
+    vm_size   = "Standard_E4s_v3" # Memory optimized
+    os_type   = "Linux"
+    os_sku    = "Ubuntu"
+    min_count = 0
+    max_count = 10
+    max_pods  = 30
+    zones     = ["1", "2", "3"]
+    mode      = "User"
     node_labels = {
       "nodepool-type" = "user"
       "os"            = "linux"
@@ -122,14 +122,14 @@ additional_node_pools = {
 
   # Windows pool for .NET Framework workloads
   win-apps = {
-    vm_size     = "Standard_D4s_v3"
-    os_type     = "Windows"
-    os_sku      = "Windows2022"
-    min_count   = 2
-    max_count   = 10
-    max_pods    = 30
-    zones       = ["1", "2", "3"]
-    mode        = "User"
+    vm_size   = "Standard_D4s_v3"
+    os_type   = "Windows"
+    os_sku    = "Windows2022"
+    min_count = 2
+    max_count = 10
+    max_pods  = 30
+    zones     = ["1", "2", "3"]
+    mode      = "User"
     node_labels = {
       "nodepool-type" = "user"
       "os"            = "windows"
@@ -141,14 +141,14 @@ additional_node_pools = {
 
   # Windows pool for legacy .NET Framework (Windows 2019)
   win-legacy = {
-    vm_size     = "Standard_D4s_v3"
-    os_type     = "Windows"
-    os_sku      = "Windows2019"
-    min_count   = 0
-    max_count   = 5
-    max_pods    = 30
-    zones       = ["1", "2", "3"]
-    mode        = "User"
+    vm_size   = "Standard_D4s_v3"
+    os_type   = "Windows"
+    os_sku    = "Windows2019"
+    min_count = 0
+    max_count = 5
+    max_pods  = 30
+    zones     = ["1", "2", "3"]
+    mode      = "User"
     node_labels = {
       "nodepool-type" = "user"
       "os"            = "windows"
@@ -170,11 +170,11 @@ additional_node_pools = {
     zones           = ["1", "2", "3"]
     mode            = "User"
     priority        = "Spot"
-    spot_max_price  = -1  # Pay up to on-demand price
+    spot_max_price  = -1 # Pay up to on-demand price
     eviction_policy = "Delete"
     node_labels = {
-      "nodepool-type"                            = "spot"
-      "kubernetes.azure.com/scalesetpriority"    = "spot"
+      "nodepool-type"                         = "spot"
+      "kubernetes.azure.com/scalesetpriority" = "spot"
     }
     node_taints = ["kubernetes.azure.com/scalesetpriority=spot:NoSchedule"]
   }
@@ -194,7 +194,7 @@ windows_admin_username    = "azureadmin"
 # Monitoring Configuration
 # =============================================================================
 
-log_analytics_retention_days = 90   # Longer retention for production
+log_analytics_retention_days = 90 # Longer retention for production
 oms_agent_enabled            = true
 
 # =============================================================================
@@ -202,7 +202,7 @@ oms_agent_enabled            = true
 # =============================================================================
 
 key_vault_secrets_provider_enabled = true
-azure_policy_enabled               = true   # Enable for production governance
+azure_policy_enabled               = true # Enable for production governance
 oidc_issuer_enabled                = true
 workload_identity_enabled          = true
 
@@ -210,18 +210,18 @@ workload_identity_enabled          = true
 # Container Registry Configuration
 # =============================================================================
 
-acr_sku           = "Premium"  # Premium for geo-replication and advanced features
+acr_sku           = "Premium" # Premium for geo-replication and advanced features
 acr_admin_enabled = false
 
 # =============================================================================
 # Storage Configuration
 # =============================================================================
 
-storage_replication_type = "ZRS"  # Zone-redundant for production
+storage_replication_type = "ZRS" # Zone-redundant for production
 
 # =============================================================================
 # Key Vault Configuration
 # =============================================================================
 
-key_vault_purge_protection = true  # Required for production
+key_vault_purge_protection = true # Required for production
 key_vault_soft_delete_days = 90

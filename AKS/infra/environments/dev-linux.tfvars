@@ -46,7 +46,7 @@ create_nat_gateway       = true
 
 kubernetes_version        = "1.33"
 automatic_channel_upgrade = "patch"
-sku_tier                  = "Free"  # Use Standard for SLA in production
+sku_tier                  = "Free" # Use Standard for SLA in production
 
 network_profile_preset = "azure_cni_overlay"
 service_cidr           = "10.96.0.0/16"
@@ -59,8 +59,8 @@ outbound_type          = "userAssignedNATGateway"
 
 system_node_pool = {
   name                         = "system"
-  vm_size                      = "Standard_D2s_v3"  # Cost-effective for dev
-  min_count                    = 1                   # Min 1 for dev
+  vm_size                      = "Standard_D2s_v3" # Cost-effective for dev
+  min_count                    = 1                 # Min 1 for dev
   max_count                    = 3
   max_pods                     = 30
   os_disk_size_gb              = 128
@@ -80,15 +80,15 @@ system_node_pool = {
 
 additional_node_pools = {
   # Linux user pool for general workloads
-  linux-apps = {
-    vm_size     = "Standard_D4s_v3"
-    os_type     = "Linux"
-    os_sku      = "Ubuntu"
-    min_count   = 1
-    max_count   = 5
-    max_pods    = 30
-    zones       = ["1", "2", "3"]
-    mode        = "User"
+  linuxapps = {
+    vm_size   = "Standard_D4s_v3"
+    os_type   = "Linux"
+    os_sku    = "Ubuntu"
+    min_count = 1
+    max_count = 5
+    max_pods  = 30
+    zones     = ["1", "2", "3"]
+    mode      = "User"
     node_labels = {
       "nodepool-type" = "user"
       "workload"      = "general"
@@ -108,11 +108,11 @@ additional_node_pools = {
     zones           = ["1", "2", "3"]
     mode            = "User"
     priority        = "Spot"
-    spot_max_price  = -1  # Pay up to on-demand price
+    spot_max_price  = -1 # Pay up to on-demand price
     eviction_policy = "Delete"
     node_labels = {
-      "nodepool-type"                            = "spot"
-      "kubernetes.azure.com/scalesetpriority"    = "spot"
+      "nodepool-type"                         = "spot"
+      "kubernetes.azure.com/scalesetpriority" = "spot"
     }
     node_taints = ["kubernetes.azure.com/scalesetpriority=spot:NoSchedule"]
   }
@@ -133,7 +133,7 @@ oms_agent_enabled            = true
 # =============================================================================
 
 key_vault_secrets_provider_enabled = true
-azure_policy_enabled               = false  # Enable in production
+azure_policy_enabled               = false # Enable in production
 oidc_issuer_enabled                = true
 workload_identity_enabled          = true
 
@@ -141,18 +141,18 @@ workload_identity_enabled          = true
 # Container Registry Configuration
 # =============================================================================
 
-acr_sku           = "Standard"  # Basic or Standard for dev
+acr_sku           = "Standard" # Basic or Standard for dev
 acr_admin_enabled = false
 
 # =============================================================================
 # Storage Configuration
 # =============================================================================
 
-storage_replication_type = "LRS"  # LRS is sufficient for dev
+storage_replication_type = "LRS" # LRS is sufficient for dev
 
 # =============================================================================
 # Key Vault Configuration
 # =============================================================================
 
-key_vault_purge_protection = false  # Disable for dev (easier cleanup)
+key_vault_purge_protection = false # Disable for dev (easier cleanup)
 key_vault_soft_delete_days = 7

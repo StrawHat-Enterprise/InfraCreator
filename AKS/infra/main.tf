@@ -299,9 +299,15 @@ module "aks" {
 
   # Additional Node Pools
   additional_node_pools = {
-    for name, config in var.additional_node_pools : name => merge(config, {
-      vnet_subnet_id = lookup(config, "vnet_subnet_id", module.virtual_network.subnet_ids["aks-user"])
-    })
+    for name, config in var.additional_node_pools : name => merge(
+      config,
+      {
+        vnet_subnet_id = lookup(config, "vnet_subnet_id", module.virtual_network.subnet_ids["aks-user"])
+      },
+      try(lower(config.priority), "regular") == "spot" ? {
+        max_surge = null
+      } : {}
+    )
   }
 
   # Windows Support
@@ -326,7 +332,7 @@ module "aks" {
   additional_tags = var.additional_tags
 
   depends_on = [
-    azurerm_role_assignment.aks_kubelet_mio  # Ensure AKS identity has MIO role on kubelet identity
+    azurerm_role_assignment.aks_kubelet_mio # Ensure AKS identity has MIO role on kubelet identity
   ]
 }
 
