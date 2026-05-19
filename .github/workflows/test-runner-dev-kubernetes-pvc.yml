@@ -1,0 +1,29 @@
+name: "Test: Dev Runner Kubernetes PVC"
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-dev-kubernetes-pvc:
+    name: Test Dev Kubernetes PVC Group
+    runs-on:
+      group: straw-hat-runners-linux-dev-kubernetes-pvc
+      labels: linux
+    timeout-minutes: 15
+
+    container:
+      image: alpine:3.20
+
+    steps:
+      - name: Show runner info
+        run: |
+          echo "Runner Name: $RUNNER_NAME"
+          echo "Runner OS: $RUNNER_OS"
+          echo "Runner Arch: $RUNNER_ARCH"
+          uname -a
+
+      - name: Test workspace write
+        run: |
+          mkdir -p /__w/_temp/pvc-check
+          echo "ok" > /__w/_temp/pvc-check/status.txt
+          cat /__w/_temp/pvc-check/status.txt

@@ -1,0 +1,25 @@
+name: "Test: Dev Runner DinD"
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-dev-dind:
+    name: Test Dev DinD Group
+    runs-on:
+      group: straw-hat-runners-linux-dev-dind
+      labels: linux
+    timeout-minutes: 15
+
+    steps:
+      - name: Show runner info
+        run: |
+          echo "Runner Name: $RUNNER_NAME"
+          echo "Runner OS: $RUNNER_OS"
+          echo "Runner Arch: $RUNNER_ARCH"
+          uname -a
+
+      - name: Test Docker access
+        run: |
+          docker --version
+          docker run --rm alpine:3.20 echo "dev dind runner ok"

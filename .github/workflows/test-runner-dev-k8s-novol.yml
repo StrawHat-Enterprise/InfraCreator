@@ -1,0 +1,25 @@
+name: "Test: Dev Runner K8s NoVol"
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-dev-k8s-novol:
+    name: Test Dev K8s NoVol Group
+    runs-on:
+      group: straw-runners-linux-dev-k8s-novol
+      labels: linux
+    timeout-minutes: 15
+
+    steps:
+      - name: Show runner info
+        run: |
+          echo "Runner Name: $RUNNER_NAME"
+          echo "Runner OS: $RUNNER_OS"
+          echo "Runner Arch: $RUNNER_ARCH"
+          uname -a
+
+      - name: Test Docker access
+        run: |
+          docker --version
+          docker run --rm alpine:3.20 echo "dev k8s-novol runner ok"
