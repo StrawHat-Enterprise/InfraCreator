@@ -5,7 +5,7 @@ on:
 
 jobs:
   test-dev-k8s-novol:
-    name: Test Dev K8s NoVol Group
+    name: Test Dev K8s NoVol Group (Current DinD-NoPVC)
     runs-on:
       group: straw-runners-linux-dev-k8s-novol
     timeout-minutes: 15
@@ -18,7 +18,9 @@ jobs:
           echo "Runner Arch: $RUNNER_ARCH"
           uname -a
 
-      - name: Test Docker access
+      - name: Test Docker access (dind-no-pvc behavior)
         run: |
           docker --version
+          docker pull busybox:1.36
+          docker run --rm busybox:1.36 echo "busybox pulled and run inside dind"
           docker run --rm alpine:3.20 echo "dev k8s-novol runner ok"

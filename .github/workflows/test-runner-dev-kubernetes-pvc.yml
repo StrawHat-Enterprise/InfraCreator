@@ -10,6 +10,9 @@ jobs:
       group: straw-hat-runners-linux-dev-kubernetes-pvc
     timeout-minutes: 15
 
+    container:
+      image: alpine:3.20
+
     steps:
       - name: Show runner info
         run: |
@@ -18,10 +21,14 @@ jobs:
           echo "Runner Arch: $RUNNER_ARCH"
           uname -a
 
-      - name: Test workspace write
+      - name: Validate child container execution
+        run: |
+          cat /etc/os-release
+
+      - name: Test shared workspace write
         run: |
           mkdir -p "$GITHUB_WORKSPACE/pvc-check"
-          echo "ok" > "$GITHUB_WORKSPACE/pvc-check/status.txt"
+          echo "ok-from-kubernetes-pvc" > "$GITHUB_WORKSPACE/pvc-check/status.txt"
           cat "$GITHUB_WORKSPACE/pvc-check/status.txt"
 
       - name: Keep pod alive for PVC observation
