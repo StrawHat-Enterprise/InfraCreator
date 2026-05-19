@@ -28,6 +28,19 @@ on:
           - dev
           - prod
         default: 'dev'
+      storage_account_name:
+        description: 'Storage Account Name (e.g., strawtfstateeusdevst1e78)'
+        required: true
+        type: string
+      resource_group_name:
+        description: 'Resource Group Name (e.g., straw-tfstate-eus-dev-rg)'
+        required: true
+        type: string
+      container_name:
+        description: 'Container Name'
+        required: false
+        type: string
+        default: 'tfstate'
       lock_id:
         description: 'Terraform Lock ID (optional - from error message)'
         required: false
@@ -47,9 +60,9 @@ permissions:
   id-token: write
 
 env:
-  BACKEND_RESOURCE_GROUP: "straw-tfstate-eus-dev-rg"
-  BACKEND_STORAGE_ACCOUNT: "strawtfstateeusdevst1e78"
-  BACKEND_CONTAINER: "tfstate"
+  BACKEND_RESOURCE_GROUP: ${{ inputs.resource_group_name }}
+  BACKEND_STORAGE_ACCOUNT: ${{ inputs.storage_account_name }}
+  BACKEND_CONTAINER: ${{ inputs.container_name }}
 
 jobs:
   unlock-state:
