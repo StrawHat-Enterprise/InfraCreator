@@ -447,20 +447,24 @@ jobs:
           echo "🔃 Force reconciling Flux resources..."
           
           # Reconcile GitRepository
-          flux reconcile source git flux-system
+          timeout 180 flux reconcile source git flux-system || true
           
           # Reconcile Kustomizations
-          flux reconcile kustomization infrastructure-sources || true
-          flux reconcile kustomization infrastructure-controllers || true
-          flux reconcile kustomization apps-runners || true
+          timeout 180 flux reconcile kustomization infrastructure-sources || true
+          timeout 180 flux reconcile kustomization infrastructure-controllers || true
+          timeout 180 flux reconcile kustomization apps-runners || true
           
           echo ""
           echo "📋 Current Kustomization status:"
-          kubectl get kustomizations -n flux-system
+          kubectl get kustomizations -n flux-system || true
           
           echo ""
           echo "📦 HelmRelease status:"
-          kubectl get helmreleases -A
+          kubectl get helmreleases -A || true
+
+          echo ""
+          echo "🏃 Repo-visible self-hosted runners:"
+          gh api /repos/${{ github.repository }}/actions/runners --jq '.total_count' || true
 
       # =====================================================================
       # STATUS CHECK
