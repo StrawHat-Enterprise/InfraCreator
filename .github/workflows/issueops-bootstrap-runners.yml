@@ -443,6 +443,8 @@ jobs:
 
       - name: Force reconcile GitOps
         if: needs.parse-command.outputs.action == 'sync-runners'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           echo "🔃 Force reconciling Flux resources..."
           

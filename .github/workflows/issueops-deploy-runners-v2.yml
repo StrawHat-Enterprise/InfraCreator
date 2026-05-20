@@ -160,9 +160,6 @@ jobs:
             echo "kind: Kustomization"
             echo "resources:"
             echo "  - ../../shared"
-            if [[ "${FLAVOR}" == "gh-supported" ]]; then
-              echo "  - ../../controller.yaml"
-            fi
             for t in "${TYPE_ARR[@]}"; do
               echo "  - ${t}"
             done
