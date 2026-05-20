@@ -171,6 +171,7 @@ jobs:
           for t in "${TYPE_ARR[@]}"; do
             mkdir -p "${OVERLAY_DIR}/${t}"
             NAME="${RUNNER_GROUP_PREFIX}-${ENV}-${t}"
+            [[ "${t}" == "kubernetes-novolume" ]] && NAME="${RUNNER_GROUP_PREFIX}-${ENV}-k8s-novol"
             IMAGE="${RUNNER_IMAGE_REPO}:latest"
 
             if [[ "${FLAVOR}" == "community" ]]; then
