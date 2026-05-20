@@ -625,7 +625,7 @@ jobs:
           import_diag_setting "module.key_vault.azurerm_monitor_diagnostic_setting.this[0]" "$KV_ID"
 
           set -o pipefail
-          terraform apply -auto-approve tfplan 2>&1 | tee apply_output.txt
+          terraform apply -auto-approve -no-color 2>&1 | tee apply_output.txt
           
           # Capture key outputs
           echo "aks_name=$(terraform output -raw aks_cluster_name 2>/dev/null || echo 'N/A')" >> $GITHUB_OUTPUT
