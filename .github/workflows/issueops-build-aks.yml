@@ -598,6 +598,10 @@ jobs:
           ACR_ID=$(az acr show --name "$ACR_NAME" --query id -o tsv 2>/dev/null || true)
           KV_ID=$(az resource list --resource-group "$RG_NAME" --resource-type "Microsoft.KeyVault/vaults" --query '[0].id' -o tsv 2>/dev/null || true)
 
+          if [[ -z "$ACR_ID" ]]; then
+            ACR_ID=$(az resource list --resource-group "$RG_NAME" --resource-type "Microsoft.ContainerRegistry/registries" --query '[0].id' -o tsv 2>/dev/null || true)
+          fi
+
           import_diag_setting() {
             local tf_addr="$1"
             local resource_id="$2"
