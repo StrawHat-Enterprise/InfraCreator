@@ -15,7 +15,7 @@
 #   - Validates the command syntax
 #   - Edits actions-runner-gitops to enable the requested overlays with:
 #       runnerGroup = straw-hat-runners-linux-<env>-<type>
-#       image       = ghcr.io/strawhat-enterprise/actions-runner:linux-<type>-latest
+#       image       = ghcr.io/actions/actions-runner:latest
 #   - Commits + pushes to the gitops repo (Flux reconciles)
 #
 # PREREQUISITES (must be run as separate issue comments BEFORE this command):
@@ -42,7 +42,7 @@ env:
   GITOPS_REPO: "actions-runner-gitops"
   GITOPS_OWNER: "StrawHat-Enterprise"
   RUNNER_GROUP_PREFIX: "straw-hat-runners-linux"
-  RUNNER_IMAGE_REPO: "ghcr.io/strawhat-enterprise/actions-runner"
+  RUNNER_IMAGE_REPO: "ghcr.io/actions/actions-runner"
 
 jobs:
   deploy-runners:
@@ -171,9 +171,7 @@ jobs:
           for t in "${TYPE_ARR[@]}"; do
             mkdir -p "${OVERLAY_DIR}/${t}"
             NAME="${RUNNER_GROUP_PREFIX}-${ENV}-${t}"
-            IMAGE_TAG="linux-${t}-latest"
-            [[ "${t}" == "kubernetes-pvc" || "${t}" == "kubernetes-novolume" ]] && IMAGE_TAG="linux-kubernetes-latest"
-            IMAGE="${RUNNER_IMAGE_REPO}:${IMAGE_TAG}"
+            IMAGE="${RUNNER_IMAGE_REPO}:latest"
 
             if [[ "${FLAVOR}" == "community" ]]; then
               cat > "${OVERLAY_DIR}/${t}/kustomization.yaml" <<EOF
@@ -293,7 +291,7 @@ jobs:
                 `| run     | [view](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}) |`,
                 '',
                 ok
-                  ? `Flux will reconcile runner scale sets in the **${env}** cluster. Each runner is named \`${{ env.RUNNER_GROUP_PREFIX }}-${env}-<type>\` and pulls \`${{ env.RUNNER_IMAGE_REPO }}:linux-<type>-latest\` from GHCR.\n\n> Make sure \`/set-aks-backend\`, \`/build-aks-${env}\` and \`/bootstrap-flux-${env}\` were run first.`
+                  ? `Flux will reconcile runner scale sets in the **${env}** cluster. Each runner is named \`${{ env.RUNNER_GROUP_PREFIX }}-${env}-<type>\` and pulls \`${{ env.RUNNER_IMAGE_REPO }}:latest\` from GHCR.\n\n> Make sure \`/set-aks-backend\`, \`/build-aks-${env}\` and \`/bootstrap-flux-${env}\` were run first.`
                   : `Step failed. See the workflow run for details.`
               ].join('\n')
             });
