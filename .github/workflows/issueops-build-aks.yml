@@ -589,6 +589,41 @@ jobs:
         if: needs.parse-command.outputs.action == 'apply'
         working-directory: InfraCreator/AKS/infra
         run: |
+          # Import pre-existing diagnostic settings when infrastructure exists but state was reset.
+          RG_NAME="${{ steps.check-existing.outputs.rg_name }}"
+          AKS_NAME="${{ steps.check-existing.outputs.aks_name }}"
+          ACR_NAME="${{ steps.check-existing.outputs.acr_name }}"
+
+          AKS_ID=$(az aks show --name "$AKS_NAME" --resource-group "$RG_NAME" --query id -o tsv 2>/dev/null || true)
+          ACR_ID=$(az acr show --name "$ACR_NAME" --query id -o tsv 2>/dev/null || true)
+          KV_ID=$(az resource list --resource-group "$RG_NAME" --resource-type "Microsoft.KeyVault/vaults" --query '[0].id' -o tsv 2>/dev/null || true)
+
+          import_diag_setting() {
+            local tf_addr="$1"
+            local resource_id="$2"
+
+            if [[ -z "$resource_id" ]]; then
+              return 0
+            fi
+
+            if terraform state show "$tf_addr" >/dev/null 2>&1; then
+              echo "State already contains $tf_addr"
+              return 0
+            fi
+
+            local diag_name
+            diag_name=$(az monitor diagnostic-settings list --resource "$resource_id" --query '[0].name' -o tsv 2>/dev/null || true)
+
+            if [[ -n "$diag_name" ]]; then
+              echo "Importing existing diagnostic setting: $tf_addr -> ${resource_id}|${diag_name}"
+              terraform import "$tf_addr" "${resource_id}|${diag_name}" || true
+            fi
+          }
+
+          import_diag_setting "module.aks.azurerm_monitor_diagnostic_setting.this[0]" "$AKS_ID"
+          import_diag_setting "module.container_registry.azurerm_monitor_diagnostic_setting.this[0]" "$ACR_ID"
+          import_diag_setting "module.key_vault.azurerm_monitor_diagnostic_setting.this[0]" "$KV_ID"
+
           set -o pipefail
           terraform apply -auto-approve tfplan 2>&1 | tee apply_output.txt
           
