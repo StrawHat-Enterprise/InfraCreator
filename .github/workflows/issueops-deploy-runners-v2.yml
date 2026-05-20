@@ -240,7 +240,8 @@ jobs:
                 - op: replace
                   path: /spec/values/containerMode/type
                   value: "${CMODE}"
-            ${EXTRA_PATCH}                - op: replace
+            ${EXTRA_PATCH}
+                - op: replace
                   path: /spec/values/template/spec/containers/0/image
                   value: "${IMAGE}"
               target:
